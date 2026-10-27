@@ -665,6 +665,26 @@ class InterpretationAssumptionTests(unittest.TestCase):
         self.assertEqual(reference_engine(TestCase(Decimal("20.00"), False)), "REVIEW")
 
 
+class FindDollarAmountsTests(unittest.TestCase):
+    def test_amounts_and_original_positions(self):
+        found = schema.find_dollar_amounts(POLICY_TEXT)
+        self.assertEqual([value for value, _ in found], [Decimal("40.00"), Decimal("40.00")])
+        for _, (start, end) in found:
+            self.assertEqual(POLICY_TEXT[start:end], "$40.00")
+
+    def test_same_matching_rules_as_grounding(self):
+        text = "Pay $1,000.00, $ 25, ＄４０, $4⁰.00, 40 dollars and $40,5."
+        found = schema.find_dollar_amounts(text)
+        self.assertEqual([value for value, _ in found], [Decimal("1000.00"), Decimal("25")])
+        self.assertEqual(text[found[1][1][0]:found[1][1][1]], "$ 25")
+
+    def test_positions_survive_folded_characters(self):
+        text = "ﬁne print ​: claims over $40​.00 are rejected."
+        ((value, (start, end)),) = schema.find_dollar_amounts(text)
+        self.assertEqual(value, Decimal("40.00"))
+        self.assertEqual(text[start:end], "$40​.00")
+
+
 class NoDynamicEvaluationTests(unittest.TestCase):
     def test_schema_module_never_calls_eval_exec_or_compile(self):
         source = Path(schema.__file__).read_text(encoding="utf-8")
