@@ -47,8 +47,9 @@ policy.txt ──► Muse Spark (Responses API) ──► proposed rules + test 
 | `src/policyproof/verification.py` | Four-perspective comparison, findings, verification levels, JSON report, CLI |
 | `src/policyproof/viewer.py` | Renders a JSON report as a self-contained HTML evidence page (no JavaScript) |
 | `src/policyproof/demo.py` | One-command offline demo: three verification runs plus linked evidence pages |
+| `src/policyproof/target_search.py` | Seeded, budgeted search of the target between evaluated points, with edges located to the cent |
 | `src/policyproof/reference.py` | Human-written reference for the fictional DemoCo meal policy |
-| `examples/` | Synthetic DemoCo policy, example rules, a deliberately buggy engine and a fixed engine |
+| `examples/` | Synthetic DemoCo policy, example rules, and three engines: buggy at $40.00, fixed, and one with a loophole far from any policy threshold |
 | `tests/fixtures/muse_democo_meal_response.json` | **Synthetic** Responses-API-shaped fixture for offline demos (not a real Muse output) |
 
 ## What is implemented today
@@ -71,8 +72,12 @@ policy.txt ──► Muse Spark (Responses API) ──► proposed rules + test 
   - `$` amounts found in the policy text, which probe thresholds the model may have left out;
   - the model's own test cases.
   - Each point records every source that produced it.
+- **Target search:**
+  - the target is a black box, so it can be wrong at amounts no rule mentions;
+  - between the evaluated points, PolicyProof also tries round-number amounts and seeded samples, within a fixed call budget;
+  - it then bisects to the exact cent where the target starts and stops disagreeing.
 - **Findings and levels:**
-  - confirmed, disputed or model-only target discrepancies, plus coverage gaps, precedence-dependent overlaps, unreachable rules, self-inconsistency and reference disagreement;
+  - confirmed, disputed or model-only target discrepancies (at a point, or across a range the search found), plus coverage gaps, precedence-dependent overlaps, unreachable rules, self-inconsistency and reference disagreement;
   - nested verification levels L0–L3, each with the reason it was or wasn't met.
 - **Evidence report:** a deterministic JSON report with the policy hash, evidence quotes with their positions in the policy, point provenance, decision traces, every perspective's decision, the provenance label and the scope.
 - **Evidence viewer:** a static HTML page rendered from that report. It has no JavaScript, escapes everything and recomputes nothing. A one-command offline demo produces the buggy, fixed and no-reference pages.
@@ -114,6 +119,7 @@ Verification level: L2
   L1 met: 12 points executed; 0 without a decision; 7 of 7 model expectations agree; 0 precedence-dependent point(s) reported.
   L2 met: interpreted rules and reference agree at every evaluated point
   L3 not met: target does not agree with the reference at every evaluated point
+Target search: 1500 target calls (1500 probes, 0 bisection) of a budget of 2000, seed 20261104; 0 discrepancy range(s) found. Sampling, not exhaustive.
 ERROR   TARGET_DISCREPANCY_CONFIRMED: The target decides REJECT at amount $40.00 with a service date. The independent reference and the executed proposed rules both decide APPROVE (rule democo-meal-approve-40, citing "Meal claims of $40.00 or less are approved automatically."). [point-40.00-dated]
 INFO    CHECKED: All available perspectives agree at 11 of 12 point(s).
 Not established: semantic correctness; see the report's scope and not_established.
@@ -148,6 +154,41 @@ Check the exit code with `$LASTEXITCODE` in PowerShell, or `echo $?` in bash.
 | 1 | Operational error (unreadable file, missing API key, refused overwrite, …) |
 | 2 | The proposal was rejected by validation (`VALIDATION_REJECTED`); also used by argparse for invalid arguments |
 | 3 | Verification ran and produced error-severity findings (for example a confirmed discrepancy) |
+
+### Finding bugs away from the policy's thresholds
+
+The evaluated points come from the rules, the policy text and the model, never from the target. A target can therefore be wrong somewhere none of them points to. `democo-loophole` is correct at every policy threshold, but it approves dated claims from $1,000.00 to $4,999.99, which should be rejected:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.policyproof.verification examples/democo_meal_policy.txt --replay tests/fixtures/muse_democo_meal_response.json --reference democo-meal --target democo-loophole
+```
+
+Exit code **3**. Abridged output:
+
+```
+Verification level: L2
+  L3 not met: target search found 1 range(s) where the target disagrees
+Target search: 1500 target calls (1500 probes, 0 bisection) of a budget of 2000, seed 20261104; 1 discrepancy range(s) found. Sampling, not exhaustive.
+ERROR   TARGET_DISCREPANCY_CONFIRMED: Target search: the target disagrees with the reference at every one of 87 evaluated amounts from $1000.00 to $4999.99 with a service date. The lower edge is verified: it agrees at $999.99 and disagrees at $1000.00. The upper edge is verified: it agrees at $5000.00 and disagrees at $4999.99. At $1000.00 the target decides APPROVE; the independent reference and the executed proposed rules both decide REJECT (rule democo-meal-reject-above-40, citing "Meal claims above $40.00 are rejected."). Amounts between evaluated points were sampled, not all checked. [search-999.99-dated, search-1000.00-dated, search-4999.99-dated, search-5000.00-dated]
+```
+
+Add `--search-budget 0` to see the problem this solves: without the search, the same engine reaches **L3** with exit code 0.
+
+**How the search works.** It runs once with a service date and once without. It runs only when a target is given; without a target there is nothing to search.
+1. **Round numbers:** it probes 1, 2, 2.5 and 5 × 10ᵏ dollars and one cent either side, where hand-written thresholds tend to sit.
+2. **Seeded samples:** it probes whole-cent amounts spread across each power-of-ten band between neighbouring evaluated amounts. It uses only integer arithmetic, so the same seed gives the same amounts on every platform.
+3. **Edges:** for every run of disagreeing amounts, it bisects against the nearest agreeing amount until the two are one cent apart. A reported edge is "verified" only when both sides were actually evaluated; otherwise it is given as an interval.
+
+**Settings and cost:**
+- `--search-budget N` caps target calls; the default is 2000, 0 turns the search off, and the maximum is 100000. A quarter of the budget is kept for bisection.
+- `--search-seed S` changes the samples; the default is 20261104.
+- The seed, budget, calls used and every range found are recorded under `target_search` in the JSON report.
+- In-process measurements with the DemoCo engines: about 50–60 ms at the default budget, about 0.3 s at 10,000 and about 3.6 s at 100,000.
+
+**Limits:**
+- This is sampling, not proof. A bug confined to a few isolated amounts can be missed: a target wrong only at exactly $33.33 still reaches L3, while one wrong only at a round number such as $2,500.00 is found.
+- Inside a reported range, only the listed evaluated amounts were checked. Two nearby ranges separated by an agreeing gap that no probe landed in are reported as one range.
+- On the DemoCo loophole, the round-number probes land on both edges directly. On ranges with arbitrary edges, such as $1,234.56 to $4,321.09, the bisection step locates them; the tests check both.
 
 ## Evidence viewer demo (one command)
 
@@ -185,7 +226,7 @@ The viewer only displays the report; it never recalculates findings or levels. E
 
 | Finding | Meaning |
 |---|---|
-| `TARGET_DISCREPANCY_CONFIRMED` | At this point the target differs from the reference, **and** the reference and the executed proposed rules agree |
+| `TARGET_DISCREPANCY_CONFIRMED` | At this point the target differs from the reference, **and** the reference and the executed proposed rules agree. For a range found by the target search, this holds at every evaluated amount in the range |
 | `TARGET_DISCREPANCY_DISPUTED` | The target differs from the reference, but the reference and the proposed rules disagree, so a person must decide |
 | `TARGET_DISCREPANCY_MODEL_ONLY` | There's no usable reference; the target differs from the proposed rules only. Not independent evidence |
 | `REFERENCE_DISAGREEMENT` | The proposed rules and the reference decide differently: two interpretations conflict |
@@ -205,14 +246,14 @@ Each level requires the ones below it. Levels show how far the evidence reaches;
 | L0 | The rules passed schema validation and evidence grounding against this policy text, and the interpreter supports them |
 | L1 | The rules decide every evaluated point and agree with every model expectation; overlaps are reported |
 | L2 | An independent reference was supplied, and the proposed rules agree with it at every evaluated point |
-| L3 | A target was supplied, and it agrees with the reference at every evaluated point |
+| L3 | A target was supplied; it agrees with the reference at every evaluated point, and the target search found no range where it disagrees |
 
 ### What these results do not claim
 
 - **No level states semantic correctness.** PolicyProof shows agreement between perspectives at specific inputs. It does not show that anyone has read the policy as its author intended.
 - **Confirmations are per point.** A confirmed discrepancy means that, *at that input*, two independent perspectives agree and the target differs. The proposed rules can still be wrong elsewhere; the level and the other findings show that.
 - **The reference shares an assumption.** The DemoCo policy never says whether "missing service date → review" takes precedence over "$40.00 or less → approve". The reference (`src/policyproof/reference.py`) and the proposed rules both *assume* it does. On undated claims, their agreement isn't independent evidence on that question, and PolicyProof reports it as a precedence assumption.
-- **Scope of L2 and L3.** For the rule document, the derived boundary points cover every distinct behaviour it has within the domain: whole-cent amounts from 0.00 to 1,000,000.00, with and without a service date. The reference and the target are checked only at the evaluated points; their behaviour between those points isn't tested.
+- **Scope of L2 and L3.** For the rule document, the derived boundary points cover every distinct behaviour it has within the domain: whole-cent amounts from 0.00 to 1,000,000.00, with and without a service date. The reference is checked only at the evaluated points. The target is checked there, plus at the amounts the target search sampled. Neither is checked at every amount, so L3 is strong evidence within a budget, not a proof.
 
 ## Live mode (optional)
 
@@ -239,7 +280,10 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
   - errors are redacted and carry no underlying exception, so request headers can't appear in tracebacks;
   - the tests use only fake keys.
 - **No dynamic execution.** Model output is parsed as data and checked against allowlists; there is no `eval`, `exec` or generated code. Tests check this by parsing the source.
-- **Allowlisted targets only.** `--reference` and `--target` accept fixed names (`democo-meal`, `democo-buggy`, `democo-fixed`) that map to local code. Nothing proposed by the model is ever executed.
+- **Allowlisted targets only.** `--reference` and `--target` accept fixed names (`democo-meal`, `democo-buggy`, `democo-fixed`, `democo-loophole`) that map to local code. Nothing proposed by the model is ever executed.
+- **Target failures are recorded, not fatal:**
+  - a target that raises an exception, calls `sys.exit()` or returns something other than a decision is recorded as disagreeing at that input;
+  - Ctrl+C (`KeyboardInterrupt`) still stops the run.
 - **Provenance labels.** Every result is labelled `LIVE`, `REPLAY_SAVED_LIVE_RESPONSE`, `REPLAY_SYNTHETIC` or `REPLAY_UNKNOWN_ORIGIN`. The labels come from the call path or the file and are **not** cryptographic proof of origin.
 - **Policy text is untrusted.** In the prompt it's fenced as data. Instructions inside it can't make a rule cite text that isn't in the policy, or a threshold the policy doesn't state, because validation would reject it.
 - **What the report contains:** a hash of the policy, not its text. It does include evidence quotes and rule descriptions, which are excerpts of the policy, so treat reports like the policy itself.
@@ -251,7 +295,8 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 - **Schema:** it has two fields, `amount` and `has_service_date`. One fictional policy is included.
 - **Policy-text thresholds:** only `$` amounts are recognised (not "40 dollars", other currencies or percentages), and at most 100 distinct amounts are used. Finding none doesn't prove the policy has no other thresholds.
 - **One reference:** a human-written reference exists only for the DemoCo policy. Without a reference, verification stops at L1.
-- **Target execution:** targets run in-process. There is no sandbox and no protection against hangs, so only trusted local code can be selected.
+- **Target execution:** targets run in-process. There is no sandbox and no timeout: a target that never returns hangs the run. Only trusted local code can be selected.
+- **Target search:** it samples within a budget, as described above, and can miss isolated faulty amounts.
 - **Live API contract:** the request and success-response shape were confirmed by one live call. Refusal, error and incomplete-response shapes follow the OpenAI-compatible format and haven't been seen live. The client makes no retries and the 120-second timeout applies per read, not to the whole request.
 - **Legacy modules:** `verifier.py`, `reporting.py` and `generator.py` are the original prototype and are kept for their existing tests.
 - **Non-goals:**
@@ -266,7 +311,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 .\.venv\Scripts\python.exe -B -m unittest discover -s tests -t . -v
 ```
 
-The suite has 279 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
+The suite has 303 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
 
 GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3.12 for every push and pull request.
 
@@ -277,6 +322,7 @@ GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3
 - strict, grounded validation;
 - the deterministic interpreter and boundary derivation;
 - four-perspective verification with findings and levels;
+- budgeted target search with edges located to the cent;
 - the JSON evidence report;
 - the HTML evidence viewer and the one-command offline demo;
 - the allowlisted CLI;
@@ -284,6 +330,6 @@ GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3
 
 **Not implemented (future work):**
 - richer rule schemas (more fields and types), and a second, more complex synthetic policy;
-- running targets in a sandbox (for example a remote, isolated environment) with timeouts;
+- running targets in a sandbox (for example a remote, isolated environment) with per-call timeouts, so a hanging target can't stall the run;
 - several Muse runs per policy, to measure how stable its interpretation is;
 - recognising thresholds beyond `$` amounts in the policy text.

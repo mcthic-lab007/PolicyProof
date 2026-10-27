@@ -110,6 +110,15 @@ from src.policyproof.schema import (
     find_dollar_amounts,
     validate_rule_payload,
 )
+from src.policyproof.target_search import (
+    BISECTION_SHARE,
+    DEFAULT_BUDGET,
+    DEFAULT_SEED,
+    MAX_BUDGET,
+    Judgement,
+    SearchOutcome,
+    search as search_target,
+)
 
 
 REPORT_VERSION = "1"
@@ -194,6 +203,7 @@ class VerificationResult:
     findings: tuple[Finding, ...]
     points: tuple[PointResult, ...]
     report: dict[str, Any]
+    search: SearchOutcome | None = None
 
     def codes(self) -> list[str]:
         return [finding.code for finding in self.findings]
@@ -209,13 +219,22 @@ def verify(
     proposal: MuseProposal | None = None,
     reference: Implementation | None = None,
     target: Implementation | None = None,
+    search_budget: int = DEFAULT_BUDGET,
+    search_seed: int = DEFAULT_SEED,
 ) -> VerificationResult:
     """Verify a rule document against ``policy_text``. The document is
     re-validated against this policy text first, so L0 never rests on where
-    the document came from. Problems in the model's output become findings;
-    this raises only for invalid arguments."""
+    the document came from. When a target is given, it is also searched
+    between the evaluated points (see target_search) within
+    ``search_budget`` target calls; 0 disables the search. Problems in the
+    model's output become findings; this raises only for invalid arguments."""
     if not isinstance(policy_text, str) or not policy_text.strip():
         raise ValueError("policy_text must be a non-empty string")
+    if isinstance(search_budget, bool) or not isinstance(search_budget, int) \
+            or not 0 <= search_budget <= MAX_BUDGET:
+        raise ValueError(f"search_budget must be an integer from 0 to {MAX_BUDGET}")
+    if isinstance(search_seed, bool) or not isinstance(search_seed, int):
+        raise ValueError("search_seed must be an integer")
     header = _header(policy_text, document, proposal, reference, target)
 
     try:
@@ -247,22 +266,31 @@ def verify(
         for (amount, dated), (point_id, sources, cases) in _collect_points(derivation, document)
     )
     findings += _findings(document, results, reference, target)
+
+    outcome: SearchOutcome | None = None
+    search_points: list[PointResult] = []
+    if target is not None and search_budget > 0:
+        outcome = _search(engine, results, reference, target, search_budget, search_seed)
+        range_findings, search_points = _range_findings(outcome, results, document, reference)
+        findings += range_findings
+
     findings.sort(key=lambda f: (FINDING_ORDER.index(f.code), f.points, f.rules, f.summary))
-    level, criteria = _level(results, findings, reference, target)
+    level, criteria = _level(results, findings, reference, target, outcome)
 
     report = dict(header)
     report.update(
-        verification=_verification_section(level, criteria, len(results)),
+        verification=_verification_section(level, criteria, len(results), outcome),
         rules=[_rule_record(rule) for rule in sorted(document.rules, key=lambda r: r.priority)],
         policy_thresholds=[
             {"amount": str(value), "spans": [list(span) for span in spans]}
             for value, spans in thresholds
         ],
         excluded_points=list(derivation.excluded),
-        points=[_point_record(result) for result in results],
+        points=[_point_record(result) for result in (*results, *search_points)],
         findings=[_finding_record(finding) for finding in findings],
+        target_search=_search_section(outcome, target, search_budget, reference),
     )
-    return VerificationResult(level, tuple(findings), results, report)
+    return VerificationResult(level, tuple(findings), results, report, outcome)
 
 
 def rejection_result(error: ProposalRejectedError, policy_text: str) -> VerificationResult:
@@ -385,6 +413,7 @@ def _stopped(header: dict[str, Any], finding: Finding) -> VerificationResult:
         },
         rules=[], policy_thresholds=[], excluded_points=[], points=[],
         findings=[_finding_record(finding)],
+        target_search={"performed": False, "reason": "verification stopped"},
     )
     return VerificationResult("NONE", (finding,), (), report)
 
@@ -453,7 +482,10 @@ def _collect_points(derivation, document: RuleDocument):
 def _run(implementation: Implementation, case: TestCase) -> Outcome:
     try:
         value = implementation.decide(case)
-    except Exception as exc:  # the implementation is under test; record, never crash
+    # The implementation is under test: record failures, never crash. SystemExit
+    # is caught too (a target calling sys.exit() must not end the run);
+    # KeyboardInterrupt still stops it.
+    except (Exception, SystemExit) as exc:
         return Outcome(None, f"raised {type(exc).__name__}: {str(exc)[:200]}")
     if not isinstance(value, str) or value not in DECISIONS:
         return Outcome(None, f"returned {repr(value)[:80]}, which is not a decision")
@@ -468,6 +500,169 @@ def _evaluate_point(engine, point_id, amount, dated, sources, cases, reference, 
         _run(reference, case) if reference else None,
         _run(target, case) if target else None,
     )
+
+
+def _agrees(evaluation: Evaluation, reference: Outcome | None, target: Outcome) -> bool | None:
+    """Whether the target matches the comparison basis: the reference when
+    one is given, otherwise the executed proposed rules. None: no basis."""
+    if reference is not None:
+        return None if reference.decision is None else target.decision == reference.decision
+    if evaluation.status != "DECIDED":
+        return None
+    return target.decision == evaluation.decision
+
+
+def _search(engine, results, reference, target, budget, seed) -> SearchOutcome:
+    low, high = NUMERIC_DOMAINS["amount"]
+    known = {
+        (r.amount, r.has_service_date): Judgement(
+            _agrees(r.evaluation, r.reference, r.target), (r.evaluation, r.reference, r.target)
+        )
+        for r in results
+    }
+
+    def judge(amount: Decimal, dated: bool) -> Judgement:
+        case = TestCase(amount, dated, _search_point_id(amount, dated))
+        evaluation = engine.evaluate({"amount": amount, "has_service_date": dated})
+        ref = _run(reference, case) if reference else None
+        tgt = _run(target, case)
+        return Judgement(_agrees(evaluation, ref, tgt), (evaluation, ref, tgt))
+
+    return search_target(judge, known, low=low, high=high, seed=seed, budget=budget)
+
+
+def _search_point_id(amount: Decimal, dated: bool) -> str:
+    return f"search-{amount}-{'dated' if dated else 'undated'}"
+
+
+def _range_findings(outcome: SearchOutcome, results, document, reference):
+    """One finding per discrepancy range, with the existing codes and the
+    existing rule for confirmation, applied to every disagreeing amount."""
+    rules = {rule.id: rule for rule in document.rules}
+    base = {(r.amount, r.has_service_date): r for r in results}
+    points: dict[str, PointResult] = {}
+    findings = []
+
+    def point(amount: Decimal, dated: bool, role: str) -> str:
+        if (amount, dated) in base:
+            return base[(amount, dated)].id
+        point_id = _search_point_id(amount, dated)
+        evaluation, ref, tgt = outcome.observations[(amount, dated)].payload
+        source = {"kind": "target_search", "role": role, "seed": outcome.seed}
+        existing = points.get(point_id)
+        sources = (*existing.sources, source) if existing else (source,)
+        points[point_id] = PointResult(point_id, amount, dated, sources, evaluation, (), ref, tgt)
+        return point_id
+
+    for found in outcome.ranges:
+        dated = found.has_service_date
+        payloads = [outcome.observations[(a, dated)].payload for a in found.disagreeing]
+        if reference is None:
+            code, severity = "TARGET_DISCREPANCY_MODEL_ONLY", "warning"
+        elif all(ev.status == "DECIDED" and ev.decision == ref.decision for ev, ref, _ in payloads):
+            code, severity = "TARGET_DISCREPANCY_CONFIRMED", "error"
+        else:
+            code, severity = "TARGET_DISCREPANCY_DISPUTED", "warning"
+
+        lower, upper = found.lower, found.upper
+        ids = []
+        if lower.outside is not None:
+            ids.append(point(lower.outside, dated, "agreeing amount below the range"))
+        ids.append(point(lower.inside, dated, "lowest disagreeing amount of the range"))
+        if upper.inside != lower.inside:
+            ids.append(point(upper.inside, dated, "highest disagreeing amount of the range"))
+        if upper.outside is not None:
+            ids.append(point(upper.outside, dated, "agreeing amount above the range"))
+
+        evaluation, ref, tgt = outcome.observations[(lower.inside, dated)].payload
+        summary = _range_summary(found, code, evaluation, ref, tgt, rules)
+        findings.append(Finding(
+            code, severity, summary,
+            points=tuple(ids),
+            rules=(evaluation.decided_by,) if evaluation.decided_by else (),
+            details={
+                "kind": "range",
+                "has_service_date": dated,
+                "start": str(lower.inside),
+                "end": str(upper.inside),
+                "agrees_below": None if lower.outside is None else str(lower.outside),
+                "agrees_above": None if upper.outside is None else str(upper.outside),
+                "lower_edge_verified": lower.verified,
+                "upper_edge_verified": upper.verified,
+                "disagreeing_amounts_evaluated": len(found.disagreeing),
+                "found_by_search": found.found_by_search,
+                "at_start": {"target": tgt.decision, "target_error": tgt.error,
+                             "reference": None if ref is None else ref.decision,
+                             "interpreted": evaluation.decision},
+            },
+        ))
+    return findings, list(points.values())
+
+
+def _range_summary(found, code, evaluation, ref, tgt, rules) -> str:
+    lower, upper = found.lower, found.upper
+    where = "with" if found.has_service_date else "without"
+    basis = "the reference" if ref is not None else "the executed proposed rules"
+    text = (
+        f"Target search: the target disagrees with {basis} at every one of "
+        f"{len(found.disagreeing)} evaluated amounts from ${lower.inside} to ${upper.inside} "
+        f"{where} a service date."
+    )
+    for edge, side in ((lower, "lower"), (upper, "upper")):
+        if edge.outside is None:
+            text += (f" The range reaches the {side} end of the domain."
+                     if edge.verified else f" The {side} edge could not be located.")
+        elif edge.verified:
+            text += f" The {side} edge is verified: it agrees at ${edge.outside} and disagrees at ${edge.inside}."
+        else:
+            text += (f" The {side} edge was not located to the cent: it lies between "
+                     f"${min(edge.outside, edge.inside)} and ${max(edge.outside, edge.inside)}.")
+    got = tgt.decision or f"no decision ({tgt.error})"
+    if code == "TARGET_DISCREPANCY_CONFIRMED":
+        rule = rules.get(evaluation.decided_by)
+        text += (f" At ${lower.inside} the target decides {got}; the independent reference and the "
+                 f"executed proposed rules both decide {ref.decision}")
+        text += f" (rule {rule.id}, citing \"{rule.evidence}\")." if rule else "."
+    elif code == "TARGET_DISCREPANCY_DISPUTED":
+        text += (" Not confirmed: the reference and the proposed rules do not agree at every "
+                 "disagreeing amount.")
+    else:
+        text += " No independent reference was given, so this is not confirmed."
+    return text + " Amounts between evaluated points were sampled, not all checked."
+
+
+def _search_section(outcome: SearchOutcome | None, target, budget, reference) -> dict[str, Any]:
+    if outcome is None:
+        reason = "no target supplied" if target is None else "search budget is 0"
+        return {"performed": False, "reason": reason}
+    return {
+        "performed": True,
+        "seed": outcome.seed,
+        "budget": outcome.budget,
+        "target_calls": outcome.calls,
+        "reference_calls": outcome.calls if reference is not None else 0,
+        "probe_calls": outcome.probe_calls,
+        "bisection_calls": outcome.bisection_calls,
+        "budget_exhausted": outcome.budget_exhausted,
+        "unjudged_evaluations": outcome.unjudged,
+        "ranges_found": len(outcome.ranges),
+        "strategy": (
+            "For each value of has_service_date: a round-number ladder (1, 2, 2.5 and 5 x 10^k "
+            "dollars and one cent either side), then seeded samples spread over power-of-ten "
+            "bands between neighbouring evaluated amounts, then bisection to one cent at the "
+            f"edges of every range. 1/{BISECTION_SHARE} of the budget is reserved for bisection."
+        ),
+        "comparison_basis": "independent reference" if reference is not None
+        else "executed proposed rules (no reference)",
+        "limitations": [
+            "Sampling, not exhaustive checking: faults at a few isolated amounts can be missed.",
+            "Inside a reported range only the listed evaluated amounts were checked; the range "
+            "may contain agreeing amounts that were never sampled.",
+            "Edges marked verified were evaluated on both sides; any other edge is given as an "
+            "interval.",
+            "Target calls run in this process: there is no timeout and no sandbox.",
+        ],
+    }
 
 
 def _findings(document, results, reference, target) -> list[Finding]:
@@ -661,8 +856,9 @@ def _perspectives(r: PointResult) -> dict[str, Any]:
     }
 
 
-def _level(results, findings, reference, target):
+def _level(results, findings, reference, target, outcome=None):
     codes = {f.code for f in findings}
+    ranges = [f for f in findings if f.details.get("kind") == "range"]
     expectations = [(case, r) for r in results for case in r.expectations]
     agreeing = sum(
         1 for case, r in expectations
@@ -676,9 +872,12 @@ def _level(results, findings, reference, target):
         and r.evaluation.decision == r.reference.decision
         for r in results
     )
-    target_ok = target is not None and reference is not None and all(
+    target_ok = target is not None and reference is not None and not ranges and all(
         r.target.decision is not None and r.target.decision == r.reference.decision
         for r in results
+    )
+    searched = (
+        f" and in all {outcome.calls} target-search evaluations" if outcome is not None else ""
     )
     criteria = {
         "L0": {"met": True, "detail": "The rules passed schema validation and evidence "
@@ -694,8 +893,9 @@ def _level(results, findings, reference, target):
         "L3": {"met": target_ok,
                "detail": "no target supplied" if target is None else
                "no reference to compare the target with" if reference is None else
-               "target agrees with the reference at every evaluated point" if target_ok
-               else "target does not agree with the reference at every evaluated point"},
+               f"target agrees with the reference at every evaluated point{searched}" if target_ok
+               else f"target search found {len(ranges)} range(s) where the target disagrees"
+               if ranges else "target does not agree with the reference at every evaluated point"},
     }
     level = "NONE"
     for name in LEVELS:
@@ -705,7 +905,12 @@ def _level(results, findings, reference, target):
     return level, criteria
 
 
-def _verification_section(level, criteria, point_count) -> dict[str, Any]:
+def _verification_section(level, criteria, point_count, outcome=None) -> dict[str, Any]:
+    searched = "" if outcome is None else (
+        f" In addition, the target was evaluated at {outcome.calls} amounts chosen by a seeded "
+        f"search (seed {outcome.seed}, budget {outcome.budget}) between those points; that is "
+        "sampling, not exhaustive checking."
+    )
     return {
         "level": level,
         "level_meaning": LEVEL_MEANING,
@@ -715,7 +920,7 @@ def _verification_section(level, criteria, point_count) -> dict[str, Any]:
             "rules' amount thresholds, \"$\" amounts found in the policy text, and the proposal's own "
             "test cases, inside the schema domain for both values of has_service_date. For the "
             "rule document these points show every distinct behaviour it has. For the "
-            "reference and the target, agreement holds at these points only."
+            "reference and the target, agreement holds at these points only." + searched
         ),
         "not_established": list(NOT_ESTABLISHED),
     }
@@ -787,12 +992,12 @@ def _finding_record(finding: Finding) -> dict[str, Any]:
 
 
 REFERENCE_NAMES = ("democo-meal",)
-TARGET_NAMES = ("democo-buggy", "democo-fixed")
+TARGET_NAMES = ("democo-buggy", "democo-fixed", "democo-loophole")
 
 
 def _registry() -> tuple[dict[str, Implementation], dict[str, Implementation]]:
     """The only implementations the CLI can run: fixed, trusted local code."""
-    from examples import buggy_engine, fixed_engine
+    from examples import buggy_engine, fixed_engine, loophole_engine
     from src.policyproof import reference
 
     references = {
@@ -814,6 +1019,12 @@ def _registry() -> tuple[dict[str, Implementation], dict[str, Implementation]]:
             "democo-fixed-engine",
             "Corrected DemoCo engine (examples/fixed_engine.py).",
             fixed_engine.evaluate_meal_claim,
+        ),
+        "democo-loophole": Implementation(
+            "democo-loophole-engine",
+            "DemoCo engine with a seeded loophole far from the policy's threshold "
+            "(examples/loophole_engine.py).",
+            loophole_engine.evaluate_meal_claim,
         ),
     }
     return references, targets
@@ -838,6 +1049,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="write the JSON evidence report; it quotes the policy evidence")
     parser.add_argument("--overwrite", action="store_true",
                         help="allow --report to replace an existing file")
+    parser.add_argument("--search-budget", type=_budget, default=DEFAULT_BUDGET, metavar="N",
+                        help=f"maximum target calls for the target search (0 disables it; "
+                        f"default {DEFAULT_BUDGET}, at most {MAX_BUDGET})")
+    parser.add_argument("--search-seed", type=int, default=DEFAULT_SEED, metavar="SEED",
+                        help=f"seed for the target search (default {DEFAULT_SEED})")
     args = parser.parse_args(argv)
 
     if args.overwrite and not args.report:
@@ -860,6 +1076,7 @@ def main(argv: list[str] | None = None) -> int:
         result = verify(
             proposal.document, policy_text, proposal=proposal,
             reference=references.get(args.reference), target=targets.get(args.target),
+            search_budget=args.search_budget, search_seed=args.search_seed,
         )
 
     _print_summary(result)
@@ -883,10 +1100,23 @@ def _print_summary(result: VerificationResult) -> None:
     print(f"Verification level: {result.level}")
     for name, criterion in report["verification"]["criteria"].items():
         print(f"  {name} {'met' if criterion['met'] else 'not met'}: {criterion['detail']}")
+    search = report.get("target_search", {})
+    if search.get("performed"):
+        print(f"Target search: {search['target_calls']} target calls "
+              f"({search['probe_calls']} probes, {search['bisection_calls']} bisection) of a "
+              f"budget of {search['budget']}, seed {search['seed']}; "
+              f"{search['ranges_found']} discrepancy range(s) found. Sampling, not exhaustive.")
     for finding in result.findings:
         points = f" [{', '.join(finding.points)}]" if finding.points and finding.code != "CHECKED" else ""
         print(f"{finding.severity.upper():<7} {finding.code}: {finding.summary}{points}")
     print("Not established: semantic correctness; see the report's scope and not_established.")
+
+
+def _budget(value: str) -> int:
+    budget = int(value)
+    if not 0 <= budget <= MAX_BUDGET:
+        raise argparse.ArgumentTypeError(f"must be from 0 to {MAX_BUDGET}")
+    return budget
 
 
 def _fail(message: str) -> int:

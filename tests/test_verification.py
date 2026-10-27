@@ -299,8 +299,16 @@ class FailSafeTests(unittest.TestCase):
             with self.subTest(target=name):
                 result = run(FIXTURE.document, target=Implementation(name, "bad", decide))
                 confirmed = codes(result, "TARGET_DISCREPANCY_CONFIRMED")
-                self.assertEqual(len(confirmed), len(result.points))
-                self.assertIn(fragment, confirmed[0].details["target_error"])
+                per_point = [f for f in confirmed if f.details.get("kind") != "range"]
+                self.assertEqual(len(per_point), len(result.points))
+                self.assertIn(fragment, per_point[0].details["target_error"])
+                # The target search adds one range per date value spanning the
+                # whole domain, since the target fails everywhere.
+                ranges = [f.details for f in confirmed if f.details.get("kind") == "range"]
+                self.assertEqual(
+                    sorted((r["has_service_date"], r["start"], r["end"]) for r in ranges),
+                    [(False, "0.00", "1000000.00"), (True, "0.00", "1000000.00")],
+                )
                 self.assertEqual(result.level, "L2")
 
     def test_reference_that_fails_blocks_l2(self):
