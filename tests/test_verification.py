@@ -75,7 +75,9 @@ class ConfirmedDiscrepancyTests(unittest.TestCase):
         finding = confirmed[0]
         self.assertEqual(finding.points, ("point-40.00-dated",))
         self.assertEqual(finding.details, {
-            "target": "REJECT", "target_error": None, "reference": "APPROVE", "interpreted": "APPROVE",
+            "target": "REJECT", "target_error": None, "target_failure": None,
+            "reference": "APPROVE", "interpreted": "APPROVE",
+            "model_expectations": ["APPROVE"], "disputed_because": [],
         })
         self.assertEqual(finding.rules, ("democo-meal-approve-40",))
         self.assertIn("Meal claims of $40.00 or less are approved automatically.", finding.summary)
