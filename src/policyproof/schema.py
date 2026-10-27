@@ -392,6 +392,21 @@ def _stated_dollar_amounts(evidence: str) -> set[Decimal]:
     }
 
 
+def find_dollar_amounts(text: str) -> tuple[tuple[Decimal, tuple[int, int]], ...]:
+    """Dollar amounts written in ``text``, matched exactly as threshold
+    grounding matches them, each with its [start, end) position in the
+    original, unmodified text. Only "$" amounts are recognised: "40 dollars",
+    other currencies and bare numbers are not found."""
+    folded = _fold(text)
+    return tuple(
+        (
+            Decimal(match.group(1).replace(",", "")),
+            (folded.sources[match.start()][0], folded.sources[match.end() - 1][1]),
+        )
+        for match in _DOLLAR_AMOUNT.finditer(folded.text)
+    )
+
+
 def _type_name(value: Any) -> str:
     if value is None:
         return "null"
