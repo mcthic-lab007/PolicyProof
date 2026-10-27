@@ -29,4 +29,26 @@ jobs:
       # Two tests replay a saved live Muse Spark response that is git-ignored
       # (artifacts/); they are reported as skipped here, never as passed.
       - name: Run unit tests
-        run: python -B -m unittest discover -s tests -t . -v
+        shell: bash  # runs with -eo pipefail, so tee cannot mask a test failure
+        run: python -B -m unittest discover -s tests -t . -v 2>&1 | tee test-output.txt
+
+      # Job logs need repository admin rights to read through the API, but
+      # annotations are public, so the exact counts are published as one.
+      - name: Publish test summary
+        if: always()
+        shell: bash
+        run: |
+          if [ ! -f test-output.txt ]; then
+            echo "::error title=Unit tests::the test step produced no output"
+            exit 0
+          fi
+          ran=$(grep -E '^Ran [0-9]+ tests' test-output.txt | tail -n 1 || true)
+          result=$(grep -E '^(OK|FAILED)' test-output.txt | tail -n 1 || true)
+          passed=$(grep -cE '\.\.\. ok$' test-output.txt || true)
+          failed=$(grep -cE '\.\.\. FAIL$' test-output.txt || true)
+          errors=$(grep -cE '\.\.\. ERROR$' test-output.txt || true)
+          skipped=$(grep -cE '\.\.\. skipped' test-output.txt || true)
+          echo "::notice title=Unit tests::${ran:-no Ran line} | ${result:-no result line} | passed=${passed} failed=${failed} errors=${errors} skipped=${skipped}"
+          { grep -E '\.\.\. (FAIL|ERROR)$' test-output.txt || true; } | head -n 20 | while IFS= read -r line; do
+            echo "::error title=Failing test::${line}"
+          done

@@ -149,6 +149,9 @@ EXIT_CODES = (
     (4, "INCONCLUSIVE", "no error findings, but the target's correctness is unresolved: a "
      "disputed or model-only discrepancy, or the reference and proposed rules disagree. "
      "This is not evidence that the target is wrong"),
+    (5, "INSUFFICIENT_EVIDENCE", "no error and no unresolved finding, but the verification "
+     "level is below the level required with --require-level (for example L1 without a "
+     "reference when L3 is required)"),
     (0, "OK", "no error and no unresolved finding at the evaluated points; the verification "
      "level states how independent that evidence is"),
 )
@@ -257,6 +260,7 @@ def verify(
     search_seed: int = DEFAULT_SEED,
     target_timeout: float | None = None,
     target_time_limit: float = DEFAULT_TIME_LIMIT,
+    required_level: str | None = None,
 ) -> VerificationResult:
     """Verify a rule document against ``policy_text``. The document is
     re-validated against this policy text first, so L0 never rests on where
@@ -271,6 +275,8 @@ def verify(
         raise ValueError(f"search_budget must be an integer from 0 to {MAX_BUDGET}")
     if isinstance(search_seed, bool) or not isinstance(search_seed, int):
         raise ValueError("search_seed must be an integer")
+    if required_level is not None and required_level not in LEVELS:
+        raise ValueError(f"required_level must be one of {', '.join(LEVELS)}")
     worker = None
     if target is not None and target_timeout is not None:
         if not target.import_path:
@@ -343,13 +349,16 @@ def verify(
         target_search=_search_section(outcome, target, search_budget, reference),
         target_execution=_execution_section(target, worker),
     )
-    report["verification"]["result"] = verdict(findings)
+    report["verification"]["result"] = verdict(findings, level, required_level)
     return VerificationResult(level, tuple(findings), results, report, outcome)
 
 
-def verdict(findings) -> dict[str, Any]:
+def verdict(findings, level: str = "NONE", required_level: str | None = None) -> dict[str, Any]:
     """The run's overall result and CLI exit code, derived from the findings
-    alone. Precedence: REJECTED (2) > FAILED (3) > INCONCLUSIVE (4) > OK (0)."""
+    and, only when a minimum level is required, the level reached.
+    Precedence: REJECTED (2) > FAILED (3) > INCONCLUSIVE (4) >
+    INSUFFICIENT_EVIDENCE (5) > OK (0). A required level can only turn an
+    otherwise OK result into 5; it never changes any other result."""
     codes = {f.code for f in findings}
     if "VALIDATION_REJECTED" in codes:
         exit_code = 2
@@ -357,10 +366,19 @@ def verdict(findings) -> dict[str, Any]:
         exit_code = 3
     elif codes & INCONCLUSIVE_CODES:
         exit_code = 4
+    elif required_level is not None and _rank(level) < _rank(required_level):
+        exit_code = 5
     else:
         exit_code = 0
     label, meaning = next((label, meaning) for code, label, meaning in EXIT_CODES if code == exit_code)
-    return {"exit_code": exit_code, "label": label, "meaning": meaning}
+    result = {"exit_code": exit_code, "label": label, "meaning": meaning}
+    if required_level is not None:
+        result.update(required_level=required_level, level_reached=level)
+    return result
+
+
+def _rank(level: str) -> int:
+    return LEVELS.index(level) if level in LEVELS else -1
 
 
 def rejection_result(error: ProposalRejectedError, policy_text: str) -> VerificationResult:
@@ -1184,7 +1202,7 @@ def _registry() -> tuple[dict[str, Implementation], dict[str, Implementation]]:
 
 def main(argv: list[str] | None = None) -> int:
     """Exit codes (see EXIT_CODES): 0 OK, 1 operational error, 2 proposal
-    rejected, 3 error findings, 4 inconclusive."""
+    rejected, 3 error findings, 4 inconclusive, 5 below --require-level."""
     parser = argparse.ArgumentParser(
         description="Verify Muse Spark's proposed rules against a policy, a reference and a target.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1217,6 +1235,11 @@ def main(argv: list[str] | None = None) -> int:
                         metavar="SECONDS",
                         help=f"total time allowed for target calls; later calls are skipped and "
                         f"reported as not evaluated (default {DEFAULT_TIME_LIMIT:g})")
+    parser.add_argument("--require-level", choices=LEVELS, metavar="LEVEL",
+                        help="exit 5 (INSUFFICIENT_EVIDENCE) when the run would otherwise be OK "
+                        "but reaches a lower verification level; for CI use L3 to require an "
+                        "independent reference and a target that agrees with it (default: no "
+                        "minimum)")
     parser.add_argument("--search-seed", type=int, default=DEFAULT_SEED, metavar="SEED",
                         help=f"seed for the target search (default {DEFAULT_SEED})")
     args = parser.parse_args(argv)
@@ -1243,6 +1266,7 @@ def main(argv: list[str] | None = None) -> int:
             reference=references.get(args.reference), target=targets.get(args.target),
             search_budget=args.search_budget, search_seed=args.search_seed,
             target_timeout=args.target_timeout or None, target_time_limit=args.target_time_limit,
+            required_level=args.require_level,
         )
 
     _print_summary(result)

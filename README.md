@@ -160,9 +160,14 @@ Every run ends with a `Result:` line, and the report records the same verdict un
 | 2 | `REJECTED` | The proposal failed schema and evidence validation (`VALIDATION_REJECTED`). argparse usage errors also exit with 2 |
 | 3 | `FAILED` | Error findings: a confirmed target discrepancy, a defect in the proposal (coverage gap, self-inconsistency), or part of the verification that couldn't run (for example a target that couldn't be evaluated) |
 | 4 | `INCONCLUSIVE` | No error findings, but the target's correctness is unresolved: a disputed or model-only discrepancy, or the reference and the proposed rules disagree. **Not** evidence that the target is wrong |
+| 5 | `INSUFFICIENT_EVIDENCE` | Only with `--require-level`: the run would otherwise be `OK`, but its verification level is below the required one |
 | 0 | `OK` | No error and no unresolved finding at the evaluated points. Check the level for how independent that evidence is: without a reference, 0 comes with L1 at most |
 
 If findings of several kinds are present, the highest-precedence code wins. For example, a confirmed discrepancy plus a disputed one gives 3.
+
+**For CI, add `--require-level L3`.** By default, a run with no reference can exit 0 at level L1, which is backed only by the model's own rules. `--require-level L3` turns such a run into exit 5. It then passes only when an independent reference was given, the proposed rules agree with it, and the target agrees with it at every evaluated point.
+
+A required level never changes any other result: a failed run stays 3 and an inconclusive one stays 4. Without the option, nothing changes. The report records the requirement and the level reached under `verification.result`.
 
 ### Finding bugs away from the policy's thresholds
 
@@ -354,7 +359,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 .\.venv\Scripts\python.exe -B -m unittest discover -s tests -t . -v
 ```
 
-The suite has 348 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
+The suite has 351 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
 
 GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3.12 for every push and pull request.
 

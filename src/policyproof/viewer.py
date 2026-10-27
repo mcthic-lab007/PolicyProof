@@ -223,7 +223,7 @@ def _executive(report: dict, findings: list[dict]) -> str:
     )
 
 
-VERDICT_LABELS = ("OK", "FAILED", "INCONCLUSIVE", "REJECTED", "ERROR")
+VERDICT_LABELS = ("OK", "FAILED", "INCONCLUSIVE", "INSUFFICIENT_EVIDENCE", "REJECTED", "ERROR")
 
 
 def _verdict(result: Any) -> str:
@@ -669,7 +669,7 @@ padding:6px 12px;margin:8px 0}
 #verdict{font-weight:800;padding:2px 10px;border-radius:6px;background:var(--grey-bg)}
 .verdict-ok #verdict{color:var(--green);background:var(--green-bg)}
 .verdict-failed #verdict,.verdict-rejected #verdict,.verdict-error #verdict{color:var(--red);background:var(--red-bg)}
-.verdict-inconclusive #verdict{color:var(--amber);background:var(--amber-bg)}
+.verdict-inconclusive #verdict,.verdict-insufficient-evidence #verdict{color:var(--amber);background:var(--amber-bg)}
 .failure{font-family:ui-monospace,Consolas,monospace;font-size:.8rem;color:var(--red)}
 .range{padding:8px 12px;border-left:4px solid var(--amber);background:var(--amber-bg);border-radius:4px}
 .scroll{overflow-x:auto}

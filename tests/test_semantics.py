@@ -170,6 +170,50 @@ class VerdictTests(unittest.TestCase):
                     self.assertFalse([c for c in result.codes() if c.startswith("TARGET_DISCREPANCY")])
 
 
+class RequiredLevelTests(unittest.TestCase):
+    def test_verdict_only_turns_ok_into_insufficient_evidence(self):
+        cases = [
+            ([], "L1", "L3", 5),
+            ([], "L3", "L3", 0),
+            ([], "L2", "L2", 0),
+            ([], "NONE", "L0", 5),
+            ([], "L1", None, 0),                                              # default: no minimum
+            ([finding("TARGET_DISCREPANCY_CONFIRMED", "error")], "L2", "L3", 3),
+            ([finding("TARGET_DISCREPANCY_MODEL_ONLY", "warning")], "L1", "L3", 4),
+            ([finding("VALIDATION_REJECTED", "error")], "NONE", "L3", 2),
+        ]
+        for items, level, required, code in cases:
+            with self.subTest(level=level, required=required, codes=[f.code for f in items]):
+                result = verdict(items, level, required)
+                self.assertEqual(result["exit_code"], code)
+                if required is not None:
+                    self.assertEqual((result["required_level"], result["level_reached"]), (required, level))
+                else:
+                    self.assertNotIn("required_level", result)
+
+    def test_invalid_required_level_is_rejected(self):
+        with self.assertRaises(ValueError):
+            verify(FIXTURE.document, POLICY_TEXT, required_level="L4")
+
+    def test_cli_require_level(self):
+        run = CommandLineExitCodeTests().run_main
+        replay = [str(POLICY_PATH), "--replay", str(FIXTURE_PATH)]
+        cases = [
+            (["--reference", "democo-meal", "--target", "democo-fixed", "--require-level", "L3"], 0, "OK"),
+            (["--target", "democo-fixed", "--require-level", "L3"], 5, "INSUFFICIENT_EVIDENCE"),
+            (["--reference", "democo-meal", "--require-level", "L3"], 5, "INSUFFICIENT_EVIDENCE"),
+            (["--target", "democo-fixed"], 0, "OK"),                         # unchanged default
+            (["--reference", "democo-meal", "--target", "democo-buggy", "--require-level", "L3"], 3, "FAILED"),
+            (["--target", "democo-buggy", "--require-level", "L3"], 4, "INCONCLUSIVE"),
+        ]
+        for extra, code, label in cases:
+            with self.subTest(args=extra):
+                exit_code, out, _ = run(replay + extra)
+                self.assertEqual(exit_code, code)
+                self.assertIn(f"Result: {label} (exit code {code})", out)
+        self.assertEqual(run(replay + ["--require-level", "L9"])[0], 2)
+
+
 class CommandLineExitCodeTests(unittest.TestCase):
     def run_main(self, argv):
         out, err = io.StringIO(), io.StringIO()
@@ -216,7 +260,8 @@ class CommandLineExitCodeTests(unittest.TestCase):
 
     def test_help_documents_every_exit_code(self):
         _, out, _ = self.run_main(["--help"])
-        for code, label in ((1, "ERROR"), (2, "REJECTED"), (3, "FAILED"), (4, "INCONCLUSIVE"), (0, "OK")):
+        for code, label in ((1, "ERROR"), (2, "REJECTED"), (3, "FAILED"), (4, "INCONCLUSIVE"),
+                            (5, "INSUFFICIENT_EVIDENCE"), (0, "OK")):
             self.assertIn(f"  {code}  {label}", out)
 
 
