@@ -45,6 +45,8 @@ policy.txt ──► Muse Spark (Responses API) ──► proposed rules + test 
 | `src/policyproof/schema.py` | Rule contract and validator: types, allowlists, verbatim evidence, threshold grounding |
 | `src/policyproof/rule_engine.py` | Deterministic interpreter with full decision traces; independent boundary-point derivation |
 | `src/policyproof/verification.py` | Four-perspective comparison, findings, verification levels, JSON report, CLI |
+| `src/policyproof/viewer.py` | Renders a JSON report as a self-contained HTML evidence page (no JavaScript) |
+| `src/policyproof/demo.py` | One-command offline demo: three verification runs plus linked evidence pages |
 | `src/policyproof/reference.py` | Human-written reference for the fictional DemoCo meal policy |
 | `examples/` | Synthetic DemoCo policy, example rules, a deliberately buggy engine and a fixed engine |
 | `tests/fixtures/muse_democo_meal_response.json` | **Synthetic** Responses-API-shaped fixture for offline demos (not a real Muse output) |
@@ -73,6 +75,7 @@ policy.txt ──► Muse Spark (Responses API) ──► proposed rules + test 
   - confirmed, disputed or model-only target discrepancies, plus coverage gaps, precedence-dependent overlaps, unreachable rules, self-inconsistency and reference disagreement;
   - nested verification levels L0–L3, each with the reason it was or wasn't met.
 - **Evidence report:** a deterministic JSON report with the policy hash, evidence quotes with their positions in the policy, point provenance, decision traces, every perspective's decision, the provenance label and the scope.
+- **Evidence viewer:** a static HTML page rendered from that report. It has no JavaScript, escapes everything and recomputes nothing. A one-command offline demo produces the buggy, fixed and no-reference pages.
 
 ## Setup
 
@@ -145,6 +148,36 @@ Check the exit code with `$LASTEXITCODE` in PowerShell, or `echo $?` in bash.
 | 1 | Operational error (unreadable file, missing API key, refused overwrite, …) |
 | 2 | The proposal was rejected by validation (`VALIDATION_REJECTED`); also used by argparse for invalid arguments |
 | 3 | Verification ran and produced error-severity findings (for example a confirmed discrepancy) |
+
+## Evidence viewer demo (one command)
+
+This command runs the three scenarios above (buggy target, fixed target, no reference) through the same verification CLI and renders each JSON report as a readable HTML evidence page:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.policyproof.demo
+```
+
+It prints each verification run's output and exit code (3, 0 and 0, as documented above), then the address of the main page. It writes `report-*.json` and `evidence-*.html` for each scenario to `artifacts/demo/`, which Git ignores. The command exits with 0 when everything was produced as documented.
+
+Add `--open` to open the main page in your browser, or open `artifacts/demo/evidence-buggy.html` yourself. If the files already exist, the command refuses to replace them unless you pass `--overwrite`. Use `--output-dir DIR` to write somewhere else.
+
+The main page shows, without any raw JSON:
+- the provenance label;
+- the verification level and why each level was or wasn't met;
+- the confirmed $40.00 finding, with the reference, executed rules, target and model's expectation side by side;
+- the evidence chain: the policy quote and its position, the rule and threshold, and why this point was tested;
+- the rule-by-rule trace;
+- the precedence assumption, and the fact that the reference shares it;
+- what the result doesn't establish;
+- links to the other two runs.
+
+To render any report yourself:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.policyproof.viewer artifacts/demo-report.json --output artifacts/demo-report.html
+```
+
+The viewer only displays the report; it never recalculates findings or levels. Every value from the report is HTML-escaped. The page contains no JavaScript, and its Content Security Policy blocks scripts and remote resources, so policy or model text can't run and the page makes no network requests.
 
 ## Reading the results
 
@@ -233,7 +266,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 .\.venv\Scripts\python.exe -B -m unittest discover -s tests -t . -v
 ```
 
-The suite has 257 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
+The suite has 279 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
 
 GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3.12 for every push and pull request.
 
@@ -245,6 +278,7 @@ GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3
 - the deterministic interpreter and boundary derivation;
 - four-perspective verification with findings and levels;
 - the JSON evidence report;
+- the HTML evidence viewer and the one-command offline demo;
 - the allowlisted CLI;
 - CI.
 
@@ -252,5 +286,4 @@ GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3
 - richer rule schemas (more fields and types), and a second, more complex synthetic policy;
 - running targets in a sandbox (for example a remote, isolated environment) with timeouts;
 - several Muse runs per policy, to measure how stable its interpretation is;
-- a human-readable HTML report alongside the JSON;
 - recognising thresholds beyond `$` amounts in the policy text.
