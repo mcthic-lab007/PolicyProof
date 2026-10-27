@@ -76,6 +76,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -110,6 +111,7 @@ from src.policyproof.schema import (
     find_dollar_amounts,
     validate_rule_payload,
 )
+from src.policyproof.target_worker import MAX_TIME_LIMIT, MAX_TIMEOUT, TargetWorker
 from src.policyproof.target_search import (
     BISECTION_SHARE,
     DEFAULT_BUDGET,
@@ -123,6 +125,11 @@ from src.policyproof.target_search import (
 
 REPORT_VERSION = "1"
 MAX_POLICY_THRESHOLDS = 100
+# Isolated target execution (CLI default): per-call timeout and total limit, seconds.
+DEFAULT_TARGET_TIMEOUT = 2.0
+DEFAULT_TIME_LIMIT = 120.0
+# Target outcomes that mean "not evaluated", as opposed to "evaluated and wrong".
+NOT_EVALUATED = frozenset({"not_run", "worker_startup"})
 LEVELS = ("L0", "L1", "L2", "L3")
 FINDING_ORDER = (
     "VALIDATION_REJECTED",
@@ -167,12 +174,18 @@ class Implementation:
     name: str
     description: str
     decide: Callable[[TestCase], Any]
+    # "package.module:function" for running the target in a worker process
+    # (target_worker). Without it the target can only run in-process.
+    import_path: str | None = None
 
 
 @dataclass(frozen=True)
 class Outcome:
     decision: Decision | None
     error: str | None = None
+    # None for a decision; otherwise exception, invalid_output, timeout,
+    # worker_crash, worker_startup or not_run (see target_worker).
+    failure: str | None = None
 
 
 @dataclass(frozen=True)
@@ -221,6 +234,8 @@ def verify(
     target: Implementation | None = None,
     search_budget: int = DEFAULT_BUDGET,
     search_seed: int = DEFAULT_SEED,
+    target_timeout: float | None = None,
+    target_time_limit: float = DEFAULT_TIME_LIMIT,
 ) -> VerificationResult:
     """Verify a rule document against ``policy_text``. The document is
     re-validated against this policy text first, so L0 never rests on where
@@ -235,6 +250,12 @@ def verify(
         raise ValueError(f"search_budget must be an integer from 0 to {MAX_BUDGET}")
     if isinstance(search_seed, bool) or not isinstance(search_seed, int):
         raise ValueError("search_seed must be an integer")
+    worker = None
+    if target is not None and target_timeout is not None:
+        if not target.import_path:
+            raise ValueError("target_timeout needs a target with an import_path "
+                             "('package.module:function') so it can run in a worker process")
+        worker = TargetWorker(target.import_path, timeout=target_timeout, time_limit=target_time_limit)
     header = _header(policy_text, document, proposal, reference, target)
 
     try:
@@ -261,18 +282,28 @@ def verify(
     except DerivationLimitError as exc:
         return _stopped(header, Finding("UNSUPPORTED", "error", str(exc)))
 
-    results = tuple(
-        _evaluate_point(engine, point_id, amount, dated, sources, cases, reference, target)
-        for (amount, dated), (point_id, sources, cases) in _collect_points(derivation, document)
-    )
-    findings += _findings(document, results, reference, target)
+    if target is None:
+        run_target = None
+    elif worker is not None:
+        run_target = partial(_run_isolated, worker)
+    else:
+        run_target = partial(_run, target)
 
     outcome: SearchOutcome | None = None
     search_points: list[PointResult] = []
-    if target is not None and search_budget > 0:
-        outcome = _search(engine, results, reference, target, search_budget, search_seed)
-        range_findings, search_points = _range_findings(outcome, results, document, reference)
-        findings += range_findings
+    try:
+        results = tuple(
+            _evaluate_point(engine, point_id, amount, dated, sources, cases, reference, run_target)
+            for (amount, dated), (point_id, sources, cases) in _collect_points(derivation, document)
+        )
+        findings += _findings(document, results, reference, target)
+        if run_target is not None and search_budget > 0:
+            outcome = _search(engine, results, reference, run_target, search_budget, search_seed)
+            range_findings, search_points = _range_findings(outcome, results, document, reference)
+            findings += range_findings
+    finally:
+        if worker is not None:
+            worker.close()  # also on KeyboardInterrupt: never leave a worker behind
 
     findings.sort(key=lambda f: (FINDING_ORDER.index(f.code), f.points, f.rules, f.summary))
     level, criteria = _level(results, findings, reference, target, outcome)
@@ -289,6 +320,7 @@ def verify(
         points=[_point_record(result) for result in (*results, *search_points)],
         findings=[_finding_record(finding) for finding in findings],
         target_search=_search_section(outcome, target, search_budget, reference),
+        target_execution=_execution_section(target, worker),
     )
     return VerificationResult(level, tuple(findings), results, report, outcome)
 
@@ -486,25 +518,37 @@ def _run(implementation: Implementation, case: TestCase) -> Outcome:
     # is caught too (a target calling sys.exit() must not end the run);
     # KeyboardInterrupt still stops it.
     except (Exception, SystemExit) as exc:
-        return Outcome(None, f"raised {type(exc).__name__}: {str(exc)[:200]}")
+        return Outcome(None, f"raised {type(exc).__name__}: {str(exc)[:200]}", "exception")
     if not isinstance(value, str) or value not in DECISIONS:
-        return Outcome(None, f"returned {repr(value)[:80]}, which is not a decision")
+        return Outcome(None, f"returned {repr(value)[:80]}, which is not a decision", "invalid_output")
     return Outcome(value)
 
 
-def _evaluate_point(engine, point_id, amount, dated, sources, cases, reference, target):
+def _run_isolated(worker: TargetWorker, case: TestCase) -> Outcome:
+    decision, error, failure = worker.call(case.amount, case.has_service_date, case.description)
+    if failure is not None:
+        return Outcome(None, error, failure)
+    if decision not in DECISIONS:
+        return Outcome(None, f"returned {repr(decision)[:80]}, which is not a decision", "invalid_output")
+    return Outcome(decision)
+
+
+def _evaluate_point(engine, point_id, amount, dated, sources, cases, reference, run_target):
     evaluation = engine.evaluate({"amount": amount, "has_service_date": dated})
     case = TestCase(amount, dated, point_id)
     return PointResult(
         point_id, amount, dated, sources, evaluation, cases,
         _run(reference, case) if reference else None,
-        _run(target, case) if target else None,
+        run_target(case) if run_target else None,
     )
 
 
 def _agrees(evaluation: Evaluation, reference: Outcome | None, target: Outcome) -> bool | None:
     """Whether the target matches the comparison basis: the reference when
-    one is given, otherwise the executed proposed rules. None: no basis."""
+    one is given, otherwise the executed proposed rules. None: no basis, or
+    the target was not evaluated at all."""
+    if target.failure in NOT_EVALUATED:
+        return None
     if reference is not None:
         return None if reference.decision is None else target.decision == reference.decision
     if evaluation.status != "DECIDED":
@@ -512,7 +556,7 @@ def _agrees(evaluation: Evaluation, reference: Outcome | None, target: Outcome) 
     return target.decision == evaluation.decision
 
 
-def _search(engine, results, reference, target, budget, seed) -> SearchOutcome:
+def _search(engine, results, reference, run_target, budget, seed) -> SearchOutcome:
     low, high = NUMERIC_DOMAINS["amount"]
     known = {
         (r.amount, r.has_service_date): Judgement(
@@ -525,7 +569,7 @@ def _search(engine, results, reference, target, budget, seed) -> SearchOutcome:
         case = TestCase(amount, dated, _search_point_id(amount, dated))
         evaluation = engine.evaluate({"amount": amount, "has_service_date": dated})
         ref = _run(reference, case) if reference else None
-        tgt = _run(target, case)
+        tgt = run_target(case)
         return Judgement(_agrees(evaluation, ref, tgt), (evaluation, ref, tgt))
 
     return search_target(judge, known, low=low, high=high, seed=seed, budget=budget)
@@ -629,6 +673,31 @@ def _range_summary(found, code, evaluation, ref, tgt, rules) -> str:
     else:
         text += " No independent reference was given, so this is not confirmed."
     return text + " Amounts between evaluated points were sampled, not all checked."
+
+
+def _execution_section(target, worker: TargetWorker | None) -> dict[str, Any]:
+    if target is None:
+        return {"mode": "none", "reason": "no target supplied"}
+    if worker is None:
+        return {
+            "mode": "in-process",
+            "note": "The target ran inside the verifier with no timeout: a target that never "
+                    "returns would hang the run.",
+        }
+    return {
+        "mode": "isolated-worker-process",
+        "import_path": worker.spec,
+        "timeout_seconds": worker.timeout,
+        "time_limit_seconds": worker.time_limit,
+        "calls": worker.stats["calls"],
+        "worker_starts": worker.stats["starts"],
+        "timeouts": worker.stats["timeouts"],
+        "worker_crashes": worker.stats["crashes"],
+        "not_run": worker.stats["not_run"],
+        "note": "Each call ran in a separate worker process and was abandoned, with the worker "
+                "killed, if it did not answer within the timeout. This is process isolation "
+                "with a timeout, not a security sandbox: the worker has the user's permissions.",
+    }
 
 
 def _search_section(outcome: SearchOutcome | None, target, budget, reference) -> dict[str, Any]:
@@ -769,6 +838,16 @@ def _findings(document, results, reference, target) -> list[Finding]:
             details={"errors": {r.id: r.reference.error for r in reference_failures}},
         ))
 
+    not_evaluated = [r for r in results if r.target is not None and r.target.failure in NOT_EVALUATED]
+    if not_evaluated:
+        findings.append(Finding(
+            "UNSUPPORTED", "error",
+            f"The target was not evaluated at {len(not_evaluated)} point(s): "
+            f"{not_evaluated[0].target.error}. Nothing is concluded about the target there.",
+            points=tuple(r.id for r in not_evaluated),
+            details={"errors": {r.id: r.target.error for r in not_evaluated}},
+        ))
+
     for r in results:
         ev = r.evaluation
         ref = r.reference.decision if r.reference is not None else None
@@ -780,7 +859,7 @@ def _findings(document, results, reference, target) -> list[Finding]:
                 points=(r.id,), rules=(ev.decided_by,),
                 details={"reference": ref, "interpreted": ev.decision},
             ))
-        if r.target is None:
+        if r.target is None or r.target.failure in NOT_EVALUATED:
             continue
         tgt = r.target.decision
         if ref is not None:
@@ -879,6 +958,7 @@ def _level(results, findings, reference, target, outcome=None):
     searched = (
         f" and in all {outcome.calls} target-search evaluations" if outcome is not None else ""
     )
+    skipped = sum(1 for r in results if r.target is not None and r.target.failure in NOT_EVALUATED)
     criteria = {
         "L0": {"met": True, "detail": "The rules passed schema validation and evidence "
                "grounding, and the interpreter supports every construct they use."},
@@ -894,6 +974,7 @@ def _level(results, findings, reference, target, outcome=None):
                "detail": "no target supplied" if target is None else
                "no reference to compare the target with" if reference is None else
                f"target agrees with the reference at every evaluated point{searched}" if target_ok
+               else f"the target was not evaluated at {skipped} point(s)" if skipped
                else f"target search found {len(ranges)} range(s) where the target disagrees"
                if ranges else "target does not agree with the reference at every evaluated point"},
     }
@@ -976,7 +1057,7 @@ def _point_record(r: PointResult) -> dict[str, Any]:
         "reference": None if r.reference is None else
         {"decision": r.reference.decision, "error": r.reference.error},
         "target": None if r.target is None else
-        {"decision": r.target.decision, "error": r.target.error},
+        {"decision": r.target.decision, "error": r.target.error, "failure": r.target.failure},
     }
 
 
@@ -1014,17 +1095,20 @@ def _registry() -> tuple[dict[str, Implementation], dict[str, Implementation]]:
             "democo-buggy-engine",
             "Deliberately buggy DemoCo engine (examples/buggy_engine.py).",
             buggy_engine.evaluate_meal_claim,
+            "examples.buggy_engine:evaluate_meal_claim",
         ),
         "democo-fixed": Implementation(
             "democo-fixed-engine",
             "Corrected DemoCo engine (examples/fixed_engine.py).",
             fixed_engine.evaluate_meal_claim,
+            "examples.fixed_engine:evaluate_meal_claim",
         ),
         "democo-loophole": Implementation(
             "democo-loophole-engine",
             "DemoCo engine with a seeded loophole far from the policy's threshold "
             "(examples/loophole_engine.py).",
             loophole_engine.evaluate_meal_claim,
+            "examples.loophole_engine:evaluate_meal_claim",
         ),
     }
     return references, targets
@@ -1052,6 +1136,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--search-budget", type=_budget, default=DEFAULT_BUDGET, metavar="N",
                         help=f"maximum target calls for the target search (0 disables it; "
                         f"default {DEFAULT_BUDGET}, at most {MAX_BUDGET})")
+    parser.add_argument("--target-timeout", type=_timeout, default=DEFAULT_TARGET_TIMEOUT,
+                        metavar="SECONDS",
+                        help=f"run the target in a worker process and abandon any call that takes "
+                        f"longer (default {DEFAULT_TARGET_TIMEOUT:g}; 0 runs it in-process with no "
+                        f"timeout; at most {MAX_TIMEOUT:g})")
+    parser.add_argument("--target-time-limit", type=_time_limit, default=DEFAULT_TIME_LIMIT,
+                        metavar="SECONDS",
+                        help=f"total time allowed for target calls; later calls are skipped and "
+                        f"reported as not evaluated (default {DEFAULT_TIME_LIMIT:g})")
     parser.add_argument("--search-seed", type=int, default=DEFAULT_SEED, metavar="SEED",
                         help=f"seed for the target search (default {DEFAULT_SEED})")
     args = parser.parse_args(argv)
@@ -1077,6 +1170,7 @@ def main(argv: list[str] | None = None) -> int:
             proposal.document, policy_text, proposal=proposal,
             reference=references.get(args.reference), target=targets.get(args.target),
             search_budget=args.search_budget, search_seed=args.search_seed,
+            target_timeout=args.target_timeout or None, target_time_limit=args.target_time_limit,
         )
 
     _print_summary(result)
@@ -1100,6 +1194,14 @@ def _print_summary(result: VerificationResult) -> None:
     print(f"Verification level: {result.level}")
     for name, criterion in report["verification"]["criteria"].items():
         print(f"  {name} {'met' if criterion['met'] else 'not met'}: {criterion['detail']}")
+    execution = report.get("target_execution", {})
+    if execution.get("mode") == "isolated-worker-process":
+        print(f"Target execution: isolated worker process, {execution['timeout_seconds']:g} s per call, "
+              f"{execution['calls']} calls, {execution['timeouts']} timeout(s), "
+              f"{execution['worker_crashes']} crash(es), {execution['not_run']} skipped; "
+              "not a security sandbox.")
+    elif execution.get("mode") == "in-process":
+        print("Target execution: in-process, no timeout.")
     search = report.get("target_search", {})
     if search.get("performed"):
         print(f"Target search: {search['target_calls']} target calls "
@@ -1110,6 +1212,20 @@ def _print_summary(result: VerificationResult) -> None:
         points = f" [{', '.join(finding.points)}]" if finding.points and finding.code != "CHECKED" else ""
         print(f"{finding.severity.upper():<7} {finding.code}: {finding.summary}{points}")
     print("Not established: semantic correctness; see the report's scope and not_established.")
+
+
+def _timeout(value: str) -> float:
+    seconds = float(value)
+    if not (seconds == 0 or 0 < seconds <= MAX_TIMEOUT):
+        raise argparse.ArgumentTypeError(f"must be 0 or in (0, {MAX_TIMEOUT:g}]")
+    return seconds
+
+
+def _time_limit(value: str) -> float:
+    seconds = float(value)
+    if not 0 < seconds <= MAX_TIME_LIMIT:
+        raise argparse.ArgumentTypeError(f"must be in (0, {MAX_TIME_LIMIT:g}]")
+    return seconds
 
 
 def _budget(value: str) -> int:

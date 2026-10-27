@@ -462,7 +462,7 @@ class ReportTests(unittest.TestCase):
             sorted(["democo-meal-approve-40", "democo-meal-reject-above-40",
                     "policy_text_amount", "exact-threshold"]),
         )
-        self.assertEqual(point["target"], {"decision": "REJECT", "error": None})
+        self.assertEqual(point["target"], {"decision": "REJECT", "error": None, "failure": None})
         self.assertEqual(point["reference"], {"decision": "APPROVE", "error": None})
         self.assertEqual(point["interpreted"]["decided_by"], "democo-meal-approve-40")
         self.assertEqual(point["model_expectations"][0]["expected_decision"], "APPROVE")

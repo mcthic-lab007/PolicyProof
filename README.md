@@ -116,6 +116,7 @@ Verification level: L2
   L1 met: 12 points executed; 0 without a decision; 7 of 7 model expectations agree; 0 precedence-dependent point(s) reported.
   L2 met: interpreted rules and reference agree at every evaluated point
   L3 not met: target does not agree with the reference at every evaluated point
+Target execution: isolated worker process, 2 s per call, 1512 calls, 0 timeout(s), 0 crash(es), 0 skipped; not a security sandbox.
 Target search: 1500 target calls (1500 probes, 0 bisection) of a budget of 2000, seed 20261104; 0 discrepancy range(s) found. Sampling, not exhaustive.
 ERROR   TARGET_DISCREPANCY_CONFIRMED: The target decides REJECT at amount $40.00 with a service date. The independent reference and the executed proposed rules both decide APPROVE (rule democo-meal-approve-40, citing "Meal claims of $40.00 or less are approved automatically."). [point-40.00-dated]
 INFO    CHECKED: All available perspectives agree at 11 of 12 point(s).
@@ -180,7 +181,30 @@ Add `--search-budget 0` to see the problem this solves: without the search, the 
 - `--search-budget N` caps target calls; the default is 2000, 0 turns the search off, and the maximum is 100000. A quarter of the budget is kept for bisection.
 - `--search-seed S` changes the samples; the default is 20261104.
 - The seed, budget, calls used and every range found are recorded under `target_search` in the JSON report.
-- In-process measurements with the DemoCo engines: about 50–60 ms at the default budget, about 0.3 s at 10,000 and about 3.6 s at 100,000.
+- Measured in-process with the DemoCo engines: about 50–60 ms at the default budget, about 0.3 s at 10,000 and about 3.6 s at 100,000. With the CLI's default worker process (next section), a default-budget run takes about 0.4 s.
+
+### Targets that hang or crash
+
+The CLI runs the target in a separate worker process (`src/policyproof/target_worker.py`), never inside the verifier:
+- **Timeouts:** a call that doesn't answer within `--target-timeout` seconds (default 2) is abandoned, and the worker is killed and restarted. The outcome is recorded as `timeout`.
+- **Crashes:** a target that exits the process or writes garbage over the protocol is recorded as `worker_crash`.
+- **Both count as the target failing at that input,** so with an agreeing reference and rules they are confirmed discrepancies, like a wrong decision.
+- **Total time limit:** `--target-time-limit` (default 120 s) caps the time spent on target calls. Calls after that are skipped, and reported as **not evaluated** (`UNSUPPORTED`), never as wrong.
+- **Targets that can't start:** if the target can't even be imported, it's started once, and every point is reported as not evaluated.
+- **Ctrl+C** stops the run and kills the worker.
+- **`--target-timeout 0`** runs the target in-process, as before, with no timeout. The report's `target_execution` section records the mode, timeout, limit, calls, timeouts, crashes and skipped calls.
+
+Measured on Windows:
+- timeouts fire within about 15 ms of the configured value;
+- a worker starts in about 0.1 s;
+- one call takes about 0.1 ms;
+- a target that hangs on every call, with a 0.5 s timeout and a 3 s limit, finished 2,000 calls in 3.1 s, leaving no worker process behind.
+
+**Not a security sandbox.** The worker runs with your user's permissions and can read files, use the network or start processes. It isolates the verifier from hangs and crashes; it doesn't contain hostile code. The Muse API key variable is removed from the worker's environment.
+
+**Exchange format:** each request and answer is one line of JSON, with amounts as decimal strings, so nothing is unpickled. The target's own `print` output can't corrupt the protocol.
+
+**API users:** `verify(..., target_timeout=…)` needs the target's `Implementation` to have an `import_path` such as `"examples.loophole_engine:evaluate_meal_claim"`. Lambdas and nested functions can only run in-process, which is the default when `target_timeout` is omitted.
 
 **Limits:**
 - This is sampling, not proof. A bug confined to a few isolated amounts can be missed: a target wrong only at exactly $33.33 still reaches L3, while one wrong only at a round number such as $2,500.00 is found.
@@ -249,8 +273,10 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 - **No dynamic execution.** Model output is parsed as data and checked against allowlists; there is no `eval`, `exec` or generated code. Tests check this by parsing the source.
 - **Allowlisted targets only.** `--reference` and `--target` accept fixed names (`democo-meal`, `democo-buggy`, `democo-fixed`, `democo-loophole`) that map to local code. Nothing proposed by the model is ever executed.
 - **Target failures are recorded, not fatal:**
-  - a target that raises an exception, calls `sys.exit()` or returns something other than a decision is recorded as disagreeing at that input;
-  - Ctrl+C (`KeyboardInterrupt`) still stops the run.
+  - a target that raises an exception, calls `sys.exit()`, returns something other than a decision, times out or crashes its worker is recorded as disagreeing at that input;
+  - a target that couldn't be run at all (time limit reached, or it can't be imported) is recorded as not evaluated;
+  - Ctrl+C stops the run.
+  - In the worker, a `KeyboardInterrupt` raised by the target itself only ends that worker and is reported as a crash.
 - **Provenance labels.** Every result is labelled `LIVE`, `REPLAY_SAVED_LIVE_RESPONSE`, `REPLAY_SYNTHETIC` or `REPLAY_UNKNOWN_ORIGIN`. The labels come from the call path or the file and are **not** cryptographic proof of origin.
 - **Policy text is untrusted.** In the prompt it's fenced as data. Instructions inside it can't make a rule cite text that isn't in the policy, or a threshold the policy doesn't state, because validation would reject it.
 - **What the report contains:** a hash of the policy, not its text. It does include evidence quotes and rule descriptions, which are excerpts of the policy, so treat reports like the policy itself.
@@ -262,7 +288,9 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 - **Schema:** it has two fields, `amount` and `has_service_date`. One fictional policy is included.
 - **Policy-text thresholds:** only `$` amounts are recognised (not "40 dollars", other currencies or percentages), and at most 100 distinct amounts are used. Finding none doesn't prove the policy has no other thresholds.
 - **One reference:** a human-written reference exists only for the DemoCo policy. Without a reference, verification stops at L1.
-- **Target execution:** targets run in-process. There is no sandbox and no timeout: a target that never returns hangs the run. Only trusted local code can be selected.
+- **Target execution:** by default the CLI runs the target in a worker process with a per-call timeout and a total time limit. That protects the verifier from hangs and crashes, but it isn't a security sandbox, so only trusted local code can be selected.
+  - The reference still runs in-process.
+  - Worker isolation has been tested on Windows only; CI covers Linux once the branch is pushed.
 - **Target search:** it samples within a budget, as described above, and can miss isolated faulty amounts.
 - **Live API contract:** the request and success-response shape were confirmed by one live call. Refusal, error and incomplete-response shapes follow the OpenAI-compatible format and haven't been seen live. The client makes no retries and the 120-second timeout applies per read, not to the whole request.
 - **Legacy modules:** `verifier.py`, `reporting.py` and `generator.py` are the original prototype and are kept for their existing tests.
@@ -278,7 +306,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 .\.venv\Scripts\python.exe -B -m unittest discover -s tests -t . -v
 ```
 
-The suite has 281 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
+The suite has 305 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
 
 GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3.12 for every push and pull request.
 
@@ -290,13 +318,14 @@ GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3
 - the deterministic interpreter and boundary derivation;
 - four-perspective verification with findings and levels;
 - budgeted target search with edges located to the cent;
+- worker-process target execution with per-call timeouts and a total time limit;
 - the JSON evidence report;
 - the allowlisted CLI;
 - CI.
 
 **Not implemented (future work):**
 - richer rule schemas (more fields and types), and a second, more complex synthetic policy;
-- running targets in a sandbox (for example a remote, isolated environment) with per-call timeouts, so a hanging target can't stall the run;
+- running targets in a real security sandbox, for example a remote, isolated environment. Hang and crash isolation already exists; containment of hostile code doesn't;
 - several Muse runs per policy, to measure how stable its interpretation is;
 - a human-readable HTML report alongside the JSON;
 - recognising thresholds beyond `$` amounts in the policy text.
