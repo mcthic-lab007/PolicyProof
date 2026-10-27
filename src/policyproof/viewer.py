@@ -209,6 +209,7 @@ def _executive(report: dict, findings: list[dict]) -> str:
     ) or "none"
     return (
         "<section aria-labelledby=\"result\">\n<h2 id=\"result\">Result</h2>\n"
+        f"{_verdict(verification.get('result'))}\n"
         "<div class=\"result\">\n"
         f"<p class=\"level\"><span class=\"small\">Verification level</span>"
         f"<span id=\"verification-level\">{_e(_level(report))}</span></p>\n"
@@ -216,7 +217,47 @@ def _executive(report: dict, findings: list[dict]) -> str:
         f"<ul class=\"criteria\">{rows}</ul>\n"
         f"<p class=\"small\">Findings in this report: {_e(counts)}.</p></div>\n"
         "</div>\n"
-        f"<p><strong>What was checked.</strong> {_e(verification.get('scope'))}</p>\n</section>"
+        f"<p><strong>What was checked.</strong> {_e(verification.get('scope'))}</p>\n"
+        f"{_execution_summary(report.get('target_execution'))}"
+        f"{_search_summary(report.get('target_search'))}</section>"
+    )
+
+
+VERDICT_LABELS = ("OK", "FAILED", "INCONCLUSIVE", "REJECTED", "ERROR")
+
+
+def _verdict(result: Any) -> str:
+    if not isinstance(result, dict) or result.get("label") not in VERDICT_LABELS:
+        return "<p class=\"verdict\"><span id=\"verdict\">Run result not in report</span></p>"
+    label = result["label"]
+    return (
+        f"<p class=\"verdict verdict-{_slug(label)}\"><span id=\"verdict\">{_e(label)}</span> "
+        f"<span class=\"small\">exit code {_e(result.get('exit_code'))}: {_e(result.get('meaning'))}</span></p>"
+    )
+
+
+def _execution_summary(execution: Any) -> str:
+    if not isinstance(execution, dict) or execution.get("mode") in (None, "none"):
+        return ""
+    if execution.get("mode") == "isolated-worker-process":
+        text = (
+            f"The target ran in a separate worker process with a {_e(execution.get('timeout_seconds'))} s "
+            f"timeout per call: {_e(execution.get('calls'))} calls, {_e(execution.get('timeouts'))} timeout(s), "
+            f"{_e(execution.get('worker_crashes'))} crash(es), {_e(execution.get('not_run'))} skipped. "
+        )
+    else:
+        text = f"Target execution: {_e(execution.get('mode'))}. "
+    return f"<p class=\"small\"><strong>Target execution.</strong> {text}{_e(execution.get('note'))}</p>\n"
+
+
+def _search_summary(search: Any) -> str:
+    if not isinstance(search, dict) or search.get("performed") is not True:
+        return ""
+    return (
+        "<p class=\"small\"><strong>Target search.</strong> "
+        f"{_e(search.get('target_calls'))} target calls (budget {_e(search.get('budget'))}, seed "
+        f"{_e(search.get('seed'))}) between the evaluated points; {_e(search.get('ranges_found'))} "
+        "discrepancy range(s) found. This is sampling, not exhaustive checking.</p>\n"
     )
 
 
@@ -243,8 +284,8 @@ def _target_card(finding, points, rules, report) -> str:
     explanation = {
         "TARGET_DISCREPANCY_CONFIRMED": "Confirmed at this point: the independent reference and "
         "the executed proposed rules agree with each other, and the target differs.",
-        "TARGET_DISCREPANCY_DISPUTED": "Disputed: the reference and the proposed rules disagree "
-        "here, so a person must decide what the policy requires.",
+        "TARGET_DISCREPANCY_DISPUTED": "Disputed: the perspectives needed to confirm this do not "
+        "agree here (reasons below), so a person must decide what the policy requires.",
         "TARGET_DISCREPANCY_MODEL_ONLY": "Model-only: no usable reference here. Only the "
         "model's rules contradict the target, which is not independent evidence.",
     }[code]
@@ -255,6 +296,29 @@ def _target_card(finding, points, rules, report) -> str:
         f"<p class=\"summary\">{_e(finding.get('summary'))}</p>",
         f"<p class=\"small\">{_e(explanation)}</p>",
     ]
+    details = finding.get("details") if isinstance(finding.get("details"), dict) else {}
+    reasons = [r for r in _list(details.get("disputed_because")) if r]
+    if reasons:
+        parts.append("<p><strong>Why not confirmed:</strong></p><ul class=\"reasons\">"
+                     + "".join(f"<li>{_e(r)}</li>" for r in reasons) + "</ul>")
+    if details.get("kind") == "range":
+        dated = details.get("has_service_date")
+        where = "with" if dated is True else "without" if dated is False else "unknown"
+
+        def edge(verified: Any, outside: Any, side: str) -> str:
+            if outside is None:
+                return f"the {side} edge reaches the end of the domain"
+            state = "verified to the cent" if verified is True else "not located to the cent"
+            return f"the {side} edge is {state} (agrees at ${_e(outside)})"
+
+        parts.append(
+            f"<p class=\"range\"><strong>Range found by the target search:</strong> "
+            f"${_e(details.get('start'))} to ${_e(details.get('end'))} {_e(where)} a service date; "
+            f"{edge(details.get('lower_edge_verified'), details.get('agrees_below'), 'lower')}; "
+            f"{edge(details.get('upper_edge_verified'), details.get('agrees_above'), 'upper')}. "
+            f"{_e(details.get('disagreeing_amounts_evaluated'))} disagreeing amounts evaluated inside; "
+            "the rest of the range was sampled, not checked.</p>"
+        )
     for point_id in _list(finding.get("points")):
         point = points.get(point_id)
         if point is None:
@@ -278,6 +342,8 @@ def _perspectives(point: dict) -> str:
         if not isinstance(value, dict):
             return "<span class=\"small\">not supplied</span>"
         text = _decision(value.get("decision"))
+        if value.get("failure"):
+            text += f"<br><span class=\"failure\">{_e(value.get('failure'))}</span>"
         if value.get("error"):
             text += f"<br><span class=\"small\">{_e(value.get('error'))}</span>"
         return text
@@ -347,6 +413,9 @@ def _source(source: Any) -> str:
                 f"offset {_e(source.get('offset'))} ({_e(source.get('label'))})")
     if kind == "model_test_case":
         return f"The model's own test case <code>{_e(source.get('case_id'))}</code>"
+    if kind == "target_search":
+        return (f"Found by the target search (seed {_e(source.get('seed'))}): "
+                f"{_e(source.get('role'))}")
     if kind == "domain_bound":
         return f"Domain bound: {_e(source.get('label'))}"
     return f"{_e(kind)}: {_e(json.dumps(source, sort_keys=True, default=str))}"
@@ -596,6 +665,13 @@ background:var(--blue-bg);border-radius:4px}
 .findings{list-style:none;padding:0}.findings li{border-left:4px solid var(--line);
 padding:6px 12px;margin:8px 0}
 .callout{padding:10px 12px;background:var(--grey-bg);border-radius:8px}
+.verdict{font-size:1.05rem;margin-top:0}
+#verdict{font-weight:800;padding:2px 10px;border-radius:6px;background:var(--grey-bg)}
+.verdict-ok #verdict{color:var(--green);background:var(--green-bg)}
+.verdict-failed #verdict,.verdict-rejected #verdict,.verdict-error #verdict{color:var(--red);background:var(--red-bg)}
+.verdict-inconclusive #verdict{color:var(--amber);background:var(--amber-bg)}
+.failure{font-family:ui-monospace,Consolas,monospace;font-size:.8rem;color:var(--red)}
+.range{padding:8px 12px;border-left:4px solid var(--amber);background:var(--amber-bg);border-radius:4px}
 .scroll{overflow-x:auto}
 table{border-collapse:collapse;width:100%;font-size:.9rem}
 th,td{text-align:left;vertical-align:top;padding:6px 8px;border-bottom:1px solid var(--line)}

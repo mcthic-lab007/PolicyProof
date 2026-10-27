@@ -30,6 +30,7 @@ SCENARIOS = (
     ("buggy", "Buggy target, with reference", ["--reference", "democo-meal", "--target", "democo-buggy"], 3),
     ("fixed", "Fixed target, with reference", ["--reference", "democo-meal", "--target", "democo-fixed"], 0),
     ("no-reference", "Buggy target, no reference", ["--target", "democo-buggy"], 4),
+    ("loophole", "Loophole target, with reference", ["--reference", "democo-meal", "--target", "democo-loophole"], 3),
 )
 
 

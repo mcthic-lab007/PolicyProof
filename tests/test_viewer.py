@@ -258,6 +258,77 @@ class MalformedReportTests(unittest.TestCase):
         self.assertIn("&lt;" * 1000, page)
 
 
+class IntegratedReportRenderingTests(unittest.TestCase):
+    """Rendering of what the search, isolation and semantics work added."""
+
+    def shown_verdict(self, page):
+        return re.search(r'id="verdict">([^<]*)<', page).group(1)
+
+    def test_verdict_matches_the_report(self):
+        for report in (BUGGY, FIXED, NO_REFERENCE):
+            page = render_report(report)
+            self.assertEqual(self.shown_verdict(page), report["verification"]["result"]["label"])
+            self.assertIn(f"exit code {report['verification']['result']['exit_code']}", page)
+
+    def test_loophole_range_and_search_evidence(self):
+        page = render_report(report_for("democo-loophole"))
+        self.assertIn("<strong>Range found by the target search:</strong> $1000.00 to $4999.99 with a service date", page)
+        self.assertIn("the lower edge is verified to the cent (agrees at $999.99)", page)
+        self.assertIn("the upper edge is verified to the cent (agrees at $5000.00)", page)
+        self.assertIn("Found by the target search (seed 20261104): lowest disagreeing amount of the range", page)
+        self.assertIn("<strong>Target search.</strong> 1500 target calls", page)
+        self.assertNotIn('"kind": "target_search"', page)  # no raw-JSON fallback any more
+
+    def test_timeout_outcome_and_isolated_execution(self):
+        from src.policyproof.verification import Implementation
+        hang = Implementation("hang", "", lambda c: None, "tests.isolation_targets:hangs_at_forty")
+        refs, _ = _registry()
+        report = json.loads(verify(FIXTURE.document, POLICY_TEXT, proposal=FIXTURE, reference=refs["democo-meal"],
+                                   target=hang, target_timeout=0.5, search_budget=30).to_json())
+        page = render_report(report)
+        target = page.split('id="headline"')[1].split("</section>")[0]
+        self.assertIn('<span class="failure">timeout</span>', target)
+        self.assertIn("timed out after 0.5 s; the worker process was killed", target)
+        self.assertIn("ran in a separate worker process with a 0.5 s timeout per call", page)
+        self.assertIn("not a security sandbox", page)
+
+    def test_disputed_reasons_are_shown(self):
+        report = copy.deepcopy(BUGGY)
+        finding = next(f for f in report["findings"] if f["code"] == "TARGET_DISCREPANCY_CONFIRMED")
+        finding["code"], finding["severity"] = "TARGET_DISCREPANCY_DISPUTED", "warning"
+        finding["details"]["disputed_because"] = ["the proposal's own expected decision (APPROVE) contradicts the reference"]
+        page = render_report(report)
+        self.assertIn("<strong>Why not confirmed:</strong>", page)
+        self.assertIn("the proposal&#x27;s own expected decision (APPROVE) contradicts the reference", page)
+
+    def test_new_fields_are_escaped(self):
+        payload = "<script>alert(1)</script>"
+        report = copy.deepcopy(report_for("democo-loophole"))
+        report["verification"]["result"]["meaning"] = payload
+        report["target_execution"]["note"] = payload
+        report["target_search"]["seed"] = payload
+        rng = next(f for f in report["findings"] if f["details"].get("kind") == "range")
+        rng["details"]["start"] = payload
+        rng["details"]["disputed_because"] = [payload]
+        point = next(p for p in report["points"] if p["id"] == rng["points"][1])
+        point["target"]["failure"] = payload
+        point["sources"][0]["role"] = payload
+        page = render_report(report)
+        self.assertNotIn("<script", page.lower())
+        self.assertGreaterEqual(page.count("&lt;script&gt;"), 7)
+
+    def test_unknown_or_missing_verdict(self):
+        for value in (None, {"label": "<b>PASS</b>"}, "OK"):
+            with self.subTest(value=value):
+                report = copy.deepcopy(BUGGY)
+                report["verification"]["result"] = value
+                self.assertEqual(self.shown_verdict(render_report(report)), "Run result not in report")
+
+    def test_rendering_is_deterministic(self):
+        report = report_for("democo-loophole")
+        self.assertEqual(render_report(report), render_report(json.loads(json.dumps(report))))
+
+
 class CommandLineTests(unittest.TestCase):
     def run_main(self, module, argv):
         out, err = io.StringIO(), io.StringIO()
@@ -318,7 +389,7 @@ class DemoTests(unittest.TestCase):
             out_dir = Path(tmp) / "demo"
             code, out, _ = self.run_demo(["--output-dir", str(out_dir)])
             self.assertEqual(code, 0)
-            self.assertIn("verification exit code: 3 (documented: 3)", out)
+            self.assertEqual(out.count("verification exit code: 3 (documented: 3)"), 2)
             self.assertEqual(out.count("verification exit code: 0 (documented: 0)"), 1)
             self.assertEqual(out.count("verification exit code: 4 (documented: 4)"), 1)
 
@@ -326,13 +397,18 @@ class DemoTests(unittest.TestCase):
             confirmed = [f for f in buggy["findings"] if f["code"] == "TARGET_DISCREPANCY_CONFIRMED"]
             self.assertEqual([f["points"] for f in confirmed], [["point-40.00-dated"]])
             self.assertEqual(buggy["proposal"]["provenance_label"], "REPLAY_SYNTHETIC")
-            levels = {name: json.loads((out_dir / f"report-{name}.json").read_text(encoding="utf-8"))
-                      ["verification"]["level"] for name in ("buggy", "fixed", "no-reference")}
-            self.assertEqual(levels, {"buggy": "L2", "fixed": "L3", "no-reference": "L1"})
+            names = ("buggy", "fixed", "no-reference", "loophole")
+            reports = {name: json.loads((out_dir / f"report-{name}.json").read_text(encoding="utf-8")) for name in names}
+            self.assertEqual({n: r["verification"]["level"] for n, r in reports.items()},
+                             {"buggy": "L2", "fixed": "L3", "no-reference": "L1", "loophole": "L2"})
+            self.assertEqual({n: r["verification"]["result"]["label"] for n, r in reports.items()},
+                             {"buggy": "FAILED", "fixed": "OK", "no-reference": "INCONCLUSIVE", "loophole": "FAILED"})
+            loophole = [f["details"] for f in reports["loophole"]["findings"] if f["details"].get("kind") == "range"]
+            self.assertEqual([(d["start"], d["end"]) for d in loophole], [("1000.00", "4999.99")])
 
             page = (out_dir / "evidence-buggy.html").read_text(encoding="utf-8")
-            self.assertIn('<a href="evidence-fixed.html">', page)
-            self.assertIn('<a href="evidence-no-reference.html">', page)
+            for other in ("fixed", "no-reference", "loophole"):
+                self.assertIn(f'<a href="evidence-{other}.html">', page)
             first = {p.name: p.read_bytes() for p in out_dir.iterdir()}
 
             code, _, err = self.run_demo(["--output-dir", str(out_dir)])

@@ -224,13 +224,13 @@ Measured on Windows:
 
 ## Evidence viewer demo (one command)
 
-This command runs the three scenarios above (buggy target, fixed target, no reference) through the same verification CLI and renders each JSON report as a readable HTML evidence page:
+This command runs four scenarios through the same verification CLI and renders each JSON report as a readable HTML evidence page: the buggy target, the fixed target, the buggy target with no reference, and the loophole target.
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.policyproof.demo
 ```
 
-It prints each verification run's output and exit code (3, 0 and 4, as documented above), then the address of the main page. It writes `report-*.json` and `evidence-*.html` for each scenario to `artifacts/demo/`, which Git ignores. The command exits with 0 when everything was produced as documented.
+It prints each verification run's output and exit code (3, 0, 4 and 3, as documented above), then the address of the main page. It writes `report-*.json` and `evidence-*.html` for each scenario to `artifacts/demo/`, which Git ignores. The command exits with 0 when everything was produced as documented.
 
 Add `--open` to open the main page in your browser, or open `artifacts/demo/evidence-buggy.html` yourself. If the files already exist, the command refuses to replace them unless you pass `--overwrite`. Use `--output-dir DIR` to write somewhere else.
 
@@ -242,7 +242,11 @@ The main page shows, without any raw JSON:
 - the rule-by-rule trace;
 - the precedence assumption, and the fact that the reference shares it;
 - what the result doesn't establish;
-- links to the other two runs.
+- the run's result (`OK`, `FAILED`, `INCONCLUSIVE`, …) with its exit code;
+- how the target was run, and what the target search covered;
+- for ranges found by the search, the exact edges and whether each was verified;
+- for disputed findings, why they couldn't be confirmed;
+- links to the other three runs.
 
 To render any report yourself:
 
@@ -350,7 +354,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 .\.venv\Scripts\python.exe -B -m unittest discover -s tests -t . -v
 ```
 
-The suite has 341 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
+The suite has 348 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
 
 GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3.12 for every push and pull request.
 
