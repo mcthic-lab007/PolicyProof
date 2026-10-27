@@ -1,0 +1,19 @@
+{
+  "_fixture_note": "Synthetic, hand-written in the Responses API shape for offline tests and demo replay. Not recorded from a live Muse Spark call.",
+  "id": "resp_synthetic_democo_meal_001",
+  "object": "response",
+  "status": "completed",
+  "model": "muse-spark-1.3",
+  "output": [
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\n  \"schema_version\": \"1.0\",\n  \"policy_id\": \"democo-meal-claims\",\n  \"rules\": [\n    {\n      \"id\": \"democo-meal-review-no-date\",\n      \"description\": \"Claims without a service date go to manual review. Interpretation assumption: this takes precedence over the amount rules; the policy does not state a precedence order.\",\n      \"priority\": 1,\n      \"conditions\": [\n        {\"field\": \"has_service_date\", \"operator\": \"==\", \"value\": false}\n      ],\n      \"decision\": \"REVIEW\",\n      \"evidence\": \"Claims without a service date must be sent for manual review.\"\n    },\n    {\n      \"id\": \"democo-meal-approve-40\",\n      \"description\": \"Dated claims of $40.00 or less are approved\",\n      \"priority\": 2,\n      \"conditions\": [\n        {\"field\": \"has_service_date\", \"operator\": \"==\", \"value\": true},\n        {\"field\": \"amount\", \"operator\": \"<=\", \"value\": 40.00}\n      ],\n      \"decision\": \"APPROVE\",\n      \"evidence\": \"Meal claims of $40.00 or less are approved automatically.\"\n    },\n    {\n      \"id\": \"democo-meal-reject-above-40\",\n      \"description\": \"Dated claims above $40.00 are rejected\",\n      \"priority\": 3,\n      \"conditions\": [\n        {\"field\": \"has_service_date\", \"operator\": \"==\", \"value\": true},\n        {\"field\": \"amount\", \"operator\": \">\", \"value\": 40.00}\n      ],\n      \"decision\": \"REJECT\",\n      \"evidence\": \"Meal claims above $40.00 are rejected.\"\n    }\n  ],\n  \"test_cases\": [\n    {\n      \"id\": \"just-below-threshold\",\n      \"inputs\": {\"amount\": 39.99, \"has_service_date\": true},\n      \"expected_decision\": \"APPROVE\",\n      \"rule_id\": \"democo-meal-approve-40\",\n      \"rationale\": \"One cent below the threshold\"\n    },\n    {\n      \"id\": \"exact-threshold\",\n      \"inputs\": {\"amount\": 40.00, \"has_service_date\": true},\n      \"expected_decision\": \"APPROVE\",\n      \"rule_id\": \"democo-meal-approve-40\",\n      \"rationale\": \"\\\"$40.00 or less\\\" includes exactly $40.00\"\n    },\n    {\n      \"id\": \"just-above-threshold\",\n      \"inputs\": {\"amount\": 40.01, \"has_service_date\": true},\n      \"expected_decision\": \"REJECT\",\n      \"rule_id\": \"democo-meal-reject-above-40\"\n    },\n    {\n      \"id\": \"missing-service-date\",\n      \"inputs\": {\"amount\": 20.00, \"has_service_date\": false},\n      \"expected_decision\": \"REVIEW\",\n      \"rule_id\": \"democo-meal-review-no-date\"\n    },\n    {\n      \"id\": \"zero-amount\",\n      \"inputs\": {\"amount\": 0.00, \"has_service_date\": true},\n      \"expected_decision\": \"APPROVE\",\n      \"rule_id\": \"democo-meal-approve-40\",\n      \"rationale\": \"Smallest valid amount\"\n    },\n    {\n      \"id\": \"well-above-threshold\",\n      \"inputs\": {\"amount\": 100.00, \"has_service_date\": true},\n      \"expected_decision\": \"REJECT\",\n      \"rule_id\": \"democo-meal-reject-above-40\"\n    },\n    {\n      \"id\": \"threshold-missing-date\",\n      \"inputs\": {\"amount\": 40.00, \"has_service_date\": false},\n      \"expected_decision\": \"REVIEW\",\n      \"rule_id\": \"democo-meal-review-no-date\",\n      \"rationale\": \"Assumption: a missing date takes precedence over the amount rules\"\n    }\n  ]\n}\n"
+        }
+      ]
+    }
+  ]
+}
