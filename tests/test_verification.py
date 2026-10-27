@@ -75,7 +75,9 @@ class ConfirmedDiscrepancyTests(unittest.TestCase):
         finding = confirmed[0]
         self.assertEqual(finding.points, ("point-40.00-dated",))
         self.assertEqual(finding.details, {
-            "target": "REJECT", "target_error": None, "reference": "APPROVE", "interpreted": "APPROVE",
+            "target": "REJECT", "target_error": None, "target_failure": None,
+            "reference": "APPROVE", "interpreted": "APPROVE",
+            "model_expectations": ["APPROVE"], "disputed_because": [],
         })
         self.assertEqual(finding.rules, ("democo-meal-approve-40",))
         self.assertIn("Meal claims of $40.00 or less are approved automatically.", finding.summary)
@@ -299,8 +301,16 @@ class FailSafeTests(unittest.TestCase):
             with self.subTest(target=name):
                 result = run(FIXTURE.document, target=Implementation(name, "bad", decide))
                 confirmed = codes(result, "TARGET_DISCREPANCY_CONFIRMED")
-                self.assertEqual(len(confirmed), len(result.points))
-                self.assertIn(fragment, confirmed[0].details["target_error"])
+                per_point = [f for f in confirmed if f.details.get("kind") != "range"]
+                self.assertEqual(len(per_point), len(result.points))
+                self.assertIn(fragment, per_point[0].details["target_error"])
+                # The target search adds one range per date value spanning the
+                # whole domain, since the target fails everywhere.
+                ranges = [f.details for f in confirmed if f.details.get("kind") == "range"]
+                self.assertEqual(
+                    sorted((r["has_service_date"], r["start"], r["end"]) for r in ranges),
+                    [(False, "0.00", "1000000.00"), (True, "0.00", "1000000.00")],
+                )
                 self.assertEqual(result.level, "L2")
 
     def test_reference_that_fails_blocks_l2(self):
@@ -454,7 +464,7 @@ class ReportTests(unittest.TestCase):
             sorted(["democo-meal-approve-40", "democo-meal-reject-above-40",
                     "policy_text_amount", "exact-threshold"]),
         )
-        self.assertEqual(point["target"], {"decision": "REJECT", "error": None})
+        self.assertEqual(point["target"], {"decision": "REJECT", "error": None, "failure": None})
         self.assertEqual(point["reference"], {"decision": "APPROVE", "error": None})
         self.assertEqual(point["interpreted"]["decided_by"], "democo-meal-approve-40")
         self.assertEqual(point["model_expectations"][0]["expected_decision"], "APPROVE")
