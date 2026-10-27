@@ -319,7 +319,8 @@ class DemoTests(unittest.TestCase):
             code, out, _ = self.run_demo(["--output-dir", str(out_dir)])
             self.assertEqual(code, 0)
             self.assertIn("verification exit code: 3 (documented: 3)", out)
-            self.assertEqual(out.count("verification exit code: 0 (documented: 0)"), 2)
+            self.assertEqual(out.count("verification exit code: 0 (documented: 0)"), 1)
+            self.assertEqual(out.count("verification exit code: 4 (documented: 4)"), 1)
 
             buggy = json.loads((out_dir / "report-buggy.json").read_text(encoding="utf-8"))
             confirmed = [f for f in buggy["findings"] if f["code"] == "TARGET_DISCREPANCY_CONFIRMED"]

@@ -131,6 +131,27 @@ DEFAULT_TIME_LIMIT = 120.0
 # Target outcomes that mean "not evaluated", as opposed to "evaluated and wrong".
 NOT_EVALUATED = frozenset({"not_run", "worker_startup"})
 LEVELS = ("L0", "L1", "L2", "L3")
+# Findings that leave the verdict on the target unresolved without being
+# errors: two perspectives conflict, or only the model contradicts the target.
+INCONCLUSIVE_CODES = frozenset({
+    "TARGET_DISCREPANCY_DISPUTED",
+    "TARGET_DISCREPANCY_MODEL_ONLY",
+    "REFERENCE_DISAGREEMENT",
+})
+# Exit codes, highest precedence first: 1 is the CLI's own operational
+# error and never reaches a report; 2, 3 and 4 come from the findings.
+EXIT_CODES = (
+    (1, "ERROR", "the run could not be completed (unreadable file, missing API key, "
+     "refused overwrite, invalid option); no verification result"),
+    (2, "REJECTED", "the proposal failed schema and evidence validation; nothing was executed"),
+    (3, "FAILED", "error findings: a confirmed target discrepancy, a defect in the proposal, "
+     "or part of the verification that could not run"),
+    (4, "INCONCLUSIVE", "no error findings, but the target's correctness is unresolved: a "
+     "disputed or model-only discrepancy, or the reference and proposed rules disagree. "
+     "This is not evidence that the target is wrong"),
+    (0, "OK", "no error and no unresolved finding at the evaluated points; the verification "
+     "level states how independent that evidence is"),
+)
 FINDING_ORDER = (
     "VALIDATION_REJECTED",
     "UNSUPPORTED",
@@ -322,7 +343,24 @@ def verify(
         target_search=_search_section(outcome, target, search_budget, reference),
         target_execution=_execution_section(target, worker),
     )
+    report["verification"]["result"] = verdict(findings)
     return VerificationResult(level, tuple(findings), results, report, outcome)
+
+
+def verdict(findings) -> dict[str, Any]:
+    """The run's overall result and CLI exit code, derived from the findings
+    alone. Precedence: REJECTED (2) > FAILED (3) > INCONCLUSIVE (4) > OK (0)."""
+    codes = {f.code for f in findings}
+    if "VALIDATION_REJECTED" in codes:
+        exit_code = 2
+    elif any(f.severity == "error" for f in findings):
+        exit_code = 3
+    elif codes & INCONCLUSIVE_CODES:
+        exit_code = 4
+    else:
+        exit_code = 0
+    label, meaning = next((label, meaning) for code, label, meaning in EXIT_CODES if code == exit_code)
+    return {"exit_code": exit_code, "label": label, "meaning": meaning}
 
 
 def rejection_result(error: ProposalRejectedError, policy_text: str) -> VerificationResult:
@@ -447,6 +485,7 @@ def _stopped(header: dict[str, Any], finding: Finding) -> VerificationResult:
         findings=[_finding_record(finding)],
         target_search={"performed": False, "reason": "verification stopped"},
     )
+    report["verification"]["result"] = verdict((finding,))
     return VerificationResult("NONE", (finding,), (), report)
 
 
@@ -601,9 +640,16 @@ def _range_findings(outcome: SearchOutcome, results, document, reference):
     for found in outcome.ranges:
         dated = found.has_service_date
         payloads = [outcome.observations[(a, dated)].payload for a in found.disagreeing]
+        reasons: list[str] = []
+        if reference is not None:
+            for amount, (ev, ref, _) in zip(found.disagreeing, payloads):
+                expectations = base[(amount, dated)].expectations if (amount, dated) in base else ()
+                for reason in _dispute_reasons(ev, ref.decision, expectations):
+                    if reason not in reasons:
+                        reasons.append(reason)
         if reference is None:
             code, severity = "TARGET_DISCREPANCY_MODEL_ONLY", "warning"
-        elif all(ev.status == "DECIDED" and ev.decision == ref.decision for ev, ref, _ in payloads):
+        elif not reasons:
             code, severity = "TARGET_DISCREPANCY_CONFIRMED", "error"
         else:
             code, severity = "TARGET_DISCREPANCY_DISPUTED", "warning"
@@ -635,6 +681,7 @@ def _range_findings(outcome: SearchOutcome, results, document, reference):
                 "upper_edge_verified": upper.verified,
                 "disagreeing_amounts_evaluated": len(found.disagreeing),
                 "found_by_search": found.found_by_search,
+                "disputed_because": reasons,
                 "at_start": {"target": tgt.decision, "target_error": tgt.error,
                              "reference": None if ref is None else ref.decision,
                              "interpreted": evaluation.decision},
@@ -668,8 +715,8 @@ def _range_summary(found, code, evaluation, ref, tgt, rules) -> str:
                  f"executed proposed rules both decide {ref.decision}")
         text += f" (rule {rule.id}, citing \"{rule.evidence}\")." if rule else "."
     elif code == "TARGET_DISCREPANCY_DISPUTED":
-        text += (" Not confirmed: the reference and the proposed rules do not agree at every "
-                 "disagreeing amount.")
+        text += (" Not confirmed at every disagreeing amount: the proposed rules or the "
+                 "proposal's own expected decisions do not agree with the reference there.")
     else:
         text += " No independent reference was given, so this is not confirmed."
     return text + " Amounts between evaluated points were sampled, not all checked."
@@ -865,14 +912,17 @@ def _findings(document, results, reference, target) -> list[Finding]:
         if ref is not None:
             if tgt == ref:
                 continue
-            confirmed = ev.status == "DECIDED" and ev.decision == ref
+            reasons = _dispute_reasons(ev, ref, r.expectations)
+            confirmed = not reasons
             code = "TARGET_DISCREPANCY_CONFIRMED" if confirmed else "TARGET_DISCREPANCY_DISPUTED"
-            summary = _target_summary(r, rules, ref, confirmed)
+            summary = _target_summary(r, rules, ref, reasons)
             findings.append(Finding(
                 code, "error" if confirmed else "warning", summary,
                 points=(r.id,), rules=(ev.decided_by,) if ev.decided_by else (),
-                details={"target": tgt, "target_error": r.target.error,
-                         "reference": ref, "interpreted": ev.decision},
+                details={"target": tgt, "target_error": r.target.error, "target_failure": r.target.failure,
+                         "reference": ref, "interpreted": ev.decision,
+                         "model_expectations": [c.expected_decision for c in r.expectations],
+                         "disputed_because": reasons},
             ))
         elif ev.status == "DECIDED" and tgt != ev.decision:
             findings.append(Finding(
@@ -899,14 +949,32 @@ def _findings(document, results, reference, target) -> list[Finding]:
     return findings
 
 
-def _target_summary(r: PointResult, rules, ref: str, confirmed: bool) -> str:
+def _dispute_reasons(evaluation: Evaluation, ref: str, expectations) -> list[str]:
+    """Why a target discrepancy at one point cannot be confirmed. A
+    confirmation needs the executed rules to agree with the reference, and
+    none of the proposal's own test cases at that point to contradict the
+    reference. The model is never ground truth: it can only withhold a
+    confirmation, never create one."""
+    reasons = []
+    if evaluation.status != "DECIDED" or evaluation.decision != ref:
+        reasons.append("the proposed rules do not agree with the reference")
+    contradicting = sorted({c.expected_decision for c in expectations if c.expected_decision != ref})
+    if contradicting:
+        reasons.append(
+            "the proposal's own expected decision (" + ", ".join(contradicting)
+            + ") contradicts the reference"
+        )
+    return reasons
+
+
+def _target_summary(r: PointResult, rules, ref: str, reasons: list[str]) -> str:
     where = f"amount ${r.amount} {'with' if r.has_service_date else 'without'} a service date"
     got = r.target.decision or f"no decision ({r.target.error})"
-    if not confirmed:
+    if reasons:
         return (
-            f"The target decides {got} at {where}; the reference decides {ref}, but the "
-            f"proposed rules decide {r.evaluation.decision or 'nothing'}. Not confirmed: the "
-            "independent perspectives disagree."
+            f"The target decides {got} at {where}; the reference decides {ref} and the "
+            f"proposed rules decide {r.evaluation.decision or 'nothing'}. Not confirmed: "
+            + "; ".join(reasons) + "."
         )
     rule = rules[r.evaluation.decided_by]
     return (
@@ -1115,10 +1183,14 @@ def _registry() -> tuple[dict[str, Implementation], dict[str, Implementation]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Exit codes: 0 no error findings, 1 operational error, 2 proposal
-    rejected by validation, 3 verification produced error findings."""
+    """Exit codes (see EXIT_CODES): 0 OK, 1 operational error, 2 proposal
+    rejected, 3 error findings, 4 inconclusive."""
     parser = argparse.ArgumentParser(
-        description="Verify Muse Spark's proposed rules against a policy, a reference and a target."
+        description="Verify Muse Spark's proposed rules against a policy, a reference and a target.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="exit codes (highest precedence first):\n" + "\n".join(
+            f"  {code}  {label:<12} {meaning}" for code, label, meaning in EXIT_CODES
+        ) + "\n  argparse usage errors also exit with 2.",
     )
     parser.add_argument("policy", type=Path, help="policy text file (UTF-8)")
     source = parser.add_mutually_exclusive_group(required=True)
@@ -1183,9 +1255,7 @@ def main(argv: list[str] | None = None) -> int:
             return _fail(f"could not write report: {exc}")
         print(f"Report written to {args.report}. It quotes policy evidence; handle it like the policy.")
 
-    if result.level == "NONE" and "VALIDATION_REJECTED" in result.codes():
-        return 2
-    return 3 if any(f.severity == "error" for f in result.findings) else 0
+    return result.report["verification"]["result"]["exit_code"]
 
 
 def _print_summary(result: VerificationResult) -> None:
@@ -1212,6 +1282,8 @@ def _print_summary(result: VerificationResult) -> None:
         points = f" [{', '.join(finding.points)}]" if finding.points and finding.code != "CHECKED" else ""
         print(f"{finding.severity.upper():<7} {finding.code}: {finding.summary}{points}")
     print("Not established: semantic correctness; see the report's scope and not_established.")
+    outcome = report["verification"].get("result", {})
+    print(f"Result: {outcome.get('label')} (exit code {outcome.get('exit_code')}): {outcome.get('meaning')}")
 
 
 def _timeout(value: str) -> float:

@@ -124,6 +124,7 @@ Target search: 1500 target calls (1500 probes, 0 bisection) of a budget of 2000,
 ERROR   TARGET_DISCREPANCY_CONFIRMED: The target decides REJECT at amount $40.00 with a service date. The independent reference and the executed proposed rules both decide APPROVE (rule democo-meal-approve-40, citing "Meal claims of $40.00 or less are approved automatically."). [point-40.00-dated]
 INFO    CHECKED: All available perspectives agree at 11 of 12 point(s).
 Not established: semantic correctness; see the report's scope and not_established.
+Result: FAILED (exit code 3): error findings: a confirmed target discrepancy, a defect in the proposal, or part of the verification that could not run
 ```
 
 How to read it:
@@ -147,14 +148,21 @@ Check the exit code with `$LASTEXITCODE` in PowerShell, or `echo $?` in bash.
 
 `artifacts/` is ignored by Git. The CLI refuses to replace an existing report unless you pass `--overwrite`.
 
-**Without a reference,** omit `--reference`. The same $40.00 difference is then only `TARGET_DISCREPANCY_MODEL_ONLY`, a warning, because the only thing contradicting the target is the model's own rules. The level stops at L1, and the exit code is 0, since only error-severity findings set exit code 3.
+**Without a reference,** omit `--reference`. The same $40.00 difference is then only `TARGET_DISCREPANCY_MODEL_ONLY`, because the only thing contradicting the target is the model's own rules.
+- The level stops at L1.
+- The run ends **INCONCLUSIVE with exit code 4**. That means unresolved: it is not evidence that the target is wrong, and it doesn't pass silently either.
 
-| Exit code | Meaning |
-|---|---|
-| 0 | Verification ran; no error-severity findings |
-| 1 | Operational error (unreadable file, missing API key, refused overwrite, …) |
-| 2 | The proposal was rejected by validation (`VALIDATION_REJECTED`); also used by argparse for invalid arguments |
-| 3 | Verification ran and produced error-severity findings (for example a confirmed discrepancy) |
+Every run ends with a `Result:` line, and the report records the same verdict under `verification.result`. The exit codes, highest precedence first:
+
+| Exit code | Result | Meaning |
+|---|---|---|
+| 1 | `ERROR` | The run couldn't complete (unreadable file, missing API key, refused overwrite, invalid option); no verification result |
+| 2 | `REJECTED` | The proposal failed schema and evidence validation (`VALIDATION_REJECTED`). argparse usage errors also exit with 2 |
+| 3 | `FAILED` | Error findings: a confirmed target discrepancy, a defect in the proposal (coverage gap, self-inconsistency), or part of the verification that couldn't run (for example a target that couldn't be evaluated) |
+| 4 | `INCONCLUSIVE` | No error findings, but the target's correctness is unresolved: a disputed or model-only discrepancy, or the reference and the proposed rules disagree. **Not** evidence that the target is wrong |
+| 0 | `OK` | No error and no unresolved finding at the evaluated points. Check the level for how independent that evidence is: without a reference, 0 comes with L1 at most |
+
+If findings of several kinds are present, the highest-precedence code wins. For example, a confirmed discrepancy plus a disputed one gives 3.
 
 ### Finding bugs away from the policy's thresholds
 
@@ -222,7 +230,7 @@ This command runs the three scenarios above (buggy target, fixed target, no refe
 .\.venv\Scripts\python.exe -m src.policyproof.demo
 ```
 
-It prints each verification run's output and exit code (3, 0 and 0, as documented above), then the address of the main page. It writes `report-*.json` and `evidence-*.html` for each scenario to `artifacts/demo/`, which Git ignores. The command exits with 0 when everything was produced as documented.
+It prints each verification run's output and exit code (3, 0 and 4, as documented above), then the address of the main page. It writes `report-*.json` and `evidence-*.html` for each scenario to `artifacts/demo/`, which Git ignores. The command exits with 0 when everything was produced as documented.
 
 Add `--open` to open the main page in your browser, or open `artifacts/demo/evidence-buggy.html` yourself. If the files already exist, the command refuses to replace them unless you pass `--overwrite`. Use `--output-dir DIR` to write somewhere else.
 
@@ -250,8 +258,8 @@ The viewer only displays the report; it never recalculates findings or levels. E
 
 | Finding | Meaning |
 |---|---|
-| `TARGET_DISCREPANCY_CONFIRMED` | At this point the target differs from the reference, **and** the reference and the executed proposed rules agree. For a range found by the target search, this holds at every evaluated amount in the range |
-| `TARGET_DISCREPANCY_DISPUTED` | The target differs from the reference, but the reference and the proposed rules disagree, so a person must decide |
+| `TARGET_DISCREPANCY_CONFIRMED` | At this point the target differs from the reference, the executed proposed rules agree with the reference, **and** none of the proposal's own test cases at this point expects something else. For a range found by the target search, this holds at every evaluated amount in the range |
+| `TARGET_DISCREPANCY_DISPUTED` | The target differs from the reference, but either the proposed rules disagree with the reference, or the proposal's own expected decision at that point contradicts it. The details list which, in `disputed_because`, with every perspective's decision. A person must decide |
 | `TARGET_DISCREPANCY_MODEL_ONLY` | There's no usable reference; the target differs from the proposed rules only. Not independent evidence |
 | `REFERENCE_DISAGREEMENT` | The proposed rules and the reference decide differently: two interpretations conflict |
 | `SELF_INCONSISTENT` | The proposal's own test case contradicts its own rules |
@@ -276,6 +284,9 @@ Each level requires the ones below it. Levels show how far the evidence reaches;
 
 - **No level states semantic correctness.** PolicyProof shows agreement between perspectives at specific inputs. It does not show that anyone has read the policy as its author intended.
 - **Confirmations are per point.** A confirmed discrepancy means that, *at that input*, two independent perspectives agree and the target differs. The proposed rules can still be wrong elsewhere; the level and the other findings show that.
+- **The model can withhold a confirmation, never create one.** If the proposal's own test case at a point contradicts the reference, the model disagrees with itself there, so a discrepancy at that point is only `DISPUTED`. This catches a shared misreading: a reference and rules that both misread "$40.00 or less" would otherwise "confirm" a bug in a correct target. Two judgement calls remain:
+  - when the model's expectation, the reference and the target all decide differently, PolicyProof still chooses `DISPUTED`, the conservative option;
+  - a disagreement between the reference and the rules, on its own, makes the run `INCONCLUSIVE`, because the policy's interpretation is unresolved.
 - **The reference shares an assumption.** The DemoCo policy never says whether "missing service date → review" takes precedence over "$40.00 or less → approve". The reference (`src/policyproof/reference.py`) and the proposed rules both *assume* it does. On undated claims, their agreement isn't independent evidence on that question, and PolicyProof reports it as a precedence assumption.
 - **Scope of L2 and L3.** For the rule document, the derived boundary points cover every distinct behaviour it has within the domain: whole-cent amounts from 0.00 to 1,000,000.00, with and without a service date. The reference is checked only at the evaluated points. The target is checked there, plus at the amounts the target search sampled. Neither is checked at every amount, so L3 is strong evidence within a budget, not a proof.
 
@@ -339,7 +350,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 .\.venv\Scripts\python.exe -B -m unittest discover -s tests -t . -v
 ```
 
-The suite has 327 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
+The suite has 341 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
 
 GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3.12 for every push and pull request.
 

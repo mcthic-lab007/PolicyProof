@@ -29,7 +29,7 @@ DEFAULT_OUTPUT = ROOT / "artifacts" / "demo"
 SCENARIOS = (
     ("buggy", "Buggy target, with reference", ["--reference", "democo-meal", "--target", "democo-buggy"], 3),
     ("fixed", "Fixed target, with reference", ["--reference", "democo-meal", "--target", "democo-fixed"], 0),
-    ("no-reference", "Buggy target, no reference", ["--target", "democo-buggy"], 0),
+    ("no-reference", "Buggy target, no reference", ["--target", "democo-buggy"], 4),
 )
 
 
