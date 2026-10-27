@@ -1,0 +1,9 @@
+DemoCo Meal Expense Policy
+(Fictional policy for demonstration purposes only.)
+
+1. Every meal claim must include the date the meal was served.
+   Claims without a service date must be sent for manual review.
+
+2. Meal claims of $40.00 or less are approved automatically.
+
+3. Meal claims above $40.00 are rejected.

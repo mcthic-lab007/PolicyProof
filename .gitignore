@@ -1,0 +1,19 @@
+# Secrets and local environment config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Virtual environments
+.venv/
+venv/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated verification artifacts
+artifacts/

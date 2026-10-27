@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "policy_id": "democo-meal-claims",
+  "rules": [
+    {
+      "id": "democo-meal-review-no-date",
+      "description": "Claims without a service date go to manual review. Interpretation assumption: this takes precedence over the amount rules; the policy does not state a precedence order.",
+      "priority": 1,
+      "conditions": [
+        {"field": "has_service_date", "operator": "==", "value": false}
+      ],
+      "decision": "REVIEW",
+      "evidence": "Claims without a service date must be sent for manual review."
+    },
+    {
+      "id": "democo-meal-approve-40",
+      "description": "Dated claims of $40.00 or less are approved",
+      "priority": 2,
+      "conditions": [
+        {"field": "has_service_date", "operator": "==", "value": true},
+        {"field": "amount", "operator": "<=", "value": 40.00}
+      ],
+      "decision": "APPROVE",
+      "evidence": "Meal claims of $40.00 or less are approved automatically."
+    },
+    {
+      "id": "democo-meal-reject-above-40",
+      "description": "Dated claims above $40.00 are rejected",
+      "priority": 3,
+      "conditions": [
+        {"field": "has_service_date", "operator": "==", "value": true},
+        {"field": "amount", "operator": ">", "value": 40.00}
+      ],
+      "decision": "REJECT",
+      "evidence": "Meal claims above $40.00 are rejected."
+    }
+  ],
+  "test_cases": [
+    {
+      "id": "just-below-threshold",
+      "inputs": {"amount": 39.99, "has_service_date": true},
+      "expected_decision": "APPROVE",
+      "rule_id": "democo-meal-approve-40",
+      "rationale": "One cent below the threshold"
+    },
+    {
+      "id": "exact-threshold",
+      "inputs": {"amount": 40.00, "has_service_date": true},
+      "expected_decision": "APPROVE",
+      "rule_id": "democo-meal-approve-40",
+      "rationale": "\"$40.00 or less\" includes exactly $40.00"
+    },
+    {
+      "id": "just-above-threshold",
+      "inputs": {"amount": 40.01, "has_service_date": true},
+      "expected_decision": "REJECT",
+      "rule_id": "democo-meal-reject-above-40"
+    },
+    {
+      "id": "missing-service-date",
+      "inputs": {"amount": 20.00, "has_service_date": false},
+      "expected_decision": "REVIEW",
+      "rule_id": "democo-meal-review-no-date"
+    }
+  ]
+}
