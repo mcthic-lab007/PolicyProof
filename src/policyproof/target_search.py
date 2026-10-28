@@ -85,6 +85,9 @@ class SearchOutcome:
     unjudged: int
     ranges: tuple[DiscrepancyRange, ...]
     observations: dict[tuple[Decimal, bool], Judgement]
+    # Searched inputs whose judgement was None, in ascending order: the
+    # search says nothing about the target there.
+    unjudged_inputs: tuple[tuple[Decimal, bool], ...] = ()
 
     @property
     def calls(self) -> int:
@@ -155,10 +158,10 @@ def search(
                 sum((amount, dated) in searched for amount in disagreeing),
             ))
 
-    unjudged = sum(1 for key in searched if observed[key].agrees is None)
+    unjudged = tuple(sorted(key for key in searched if observed[key].agrees is None))
     return SearchOutcome(
-        seed, budget, calls["probe"], calls["bisection"], unjudged,
-        tuple(ranges), observed,
+        seed, budget, calls["probe"], calls["bisection"], len(unjudged),
+        tuple(ranges), observed, unjudged,
     )
 
 

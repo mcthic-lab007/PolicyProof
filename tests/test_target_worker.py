@@ -184,6 +184,9 @@ class IsolatedVerificationTests(unittest.TestCase):
         execution = result.report["target_execution"]
         self.assertEqual((execution["mode"], execution["timeouts"]), ("isolated-worker-process", 1))
         self.assertIn("not a security sandbox", execution["note"])
+        limitations = result.report["target_search"]["limitations"]
+        self.assertFalse([text for text in limitations if "run in this process" in text])
+        self.assertTrue([text for text in limitations if "target_execution" in text])
         json.loads(result.to_json())
         self.assertLess(elapsed, 15)
 
@@ -204,6 +207,20 @@ class IsolatedVerificationTests(unittest.TestCase):
         self.assertFalse(any(f.details.get("kind") == "range" for f in result.findings))
         self.assertNotEqual(result.level, "L3")
         self.assertIn("not evaluated", result.report["verification"]["criteria"]["L3"]["detail"])
+
+    def test_time_limit_during_search_is_not_reported_as_agreement(self):
+        # Regression (benchmark corpus v1, time-limit-exhausted): a correct
+        # but slow target whose search was cut short reached L3 and exit 0
+        # while most search calls were skipped.
+        result = self.run_isolated(isolated("slow"), target_timeout=2.0, target_time_limit=2.0)
+        search = result.report["target_search"]
+        self.assertGreater(search["unjudged_evaluations"], 0)
+        unjudged = [f for f in result.findings if f.code == "UNSUPPORTED" and "could not be judged" in f.summary]
+        self.assertEqual(len(unjudged), 1)
+        self.assertIn("target not_run", unjudged[0].details["reasons"])
+        self.assertNotEqual(result.level, "L3")
+        self.assertEqual(result.report["verification"]["result"]["exit_code"], 3)
+        self.assertFalse([c for c in result.codes() if c.startswith("TARGET_DISCREPANCY")])
 
     def test_target_that_cannot_start_is_not_reported_as_wrong(self):
         result = self.run_isolated(isolated("decide", module="tests.isolation_broken"))

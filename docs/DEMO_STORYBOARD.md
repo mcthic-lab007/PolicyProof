@@ -1,0 +1,31 @@
+# Three-minute demo storyboard
+
+Status: **draft, 2026-10-28. Not yet recorded or rehearsed.** Update this file whenever the product changes. Every shot must be real recorded product behaviour.
+
+Causal chain the video must show: **Muse proposal → independent verification → adversarial counterexample → comparison with the fixed implementation → inspectable evidence.**
+
+Common prefix for the commands (PowerShell, repository root):
+
+```powershell
+$py = ".\.venv\Scripts\python.exe"; $pol = "examples/democo_meal_policy.txt"
+```
+
+| Time | Visual / interaction | Narration (draft) | Evidence shown | Fallback |
+|---|---|---|---|---|
+| 0:00–0:15 | The policy text file (three short rules) | "Policies are written in prose. The software that enforces them is written in code. When the two disagree, nobody notices until money moves." | `examples/democo_meal_policy.txt` | None needed |
+| 0:15–0:45 | `& $py -m src.policyproof.verification $pol --live --reference democo-meal --target democo-buggy --report artifacts/video/rec-buggy.json` with the first output line in view | "Meta's Muse Spark reads the policy and proposes machine-checkable rules, each quoting the sentence it came from. This is a live call." | First line: `LIVE: Muse Spark API response (muse-spark-1.3, response id …)` | No key or quota: run with `--replay artifacts/muse_live_001.json` and **say "recorded earlier today from a live call"**. The screen then shows `REPLAY of a saved response`. Never call that live. |
+| 0:45–1:15 | The same output, scrolled to the findings | "PolicyProof doesn't trust Muse. It re-validates every quote, runs the rules in its own interpreter, and tests one cent either side of every threshold. The buggy engine rejects exactly $40.00, which the policy approves. A test at $39.99 and $41 would pass." | `ERROR TARGET_DISCREPANCY_CONFIRMED` at $40.00 citing "Meal claims of $40.00 or less…"; exit code 3 | Use a pre-recorded terminal take of the same command |
+| 1:15–1:50 | The loophole engine, twice: first with `--search-budget 0` (exit 0, L3), then the default | "This engine passes every threshold test. With search off, it looks perfect. With search on, PolicyProof probes round-number amounts and seeded samples, and pins a loophole to the cent: $1,000.00 to $4,999.99 gets approved." | Exit 0 vs exit 3; range with verified edges $999.99/$1,000.00 and $4,999.99/$5,000.00 | **Narration must not overclaim.** These edges are hit by the round-number ladder, not by random sampling (0 bisection calls). Do not say "it would find any loophole". |
+| 1:50–2:05 | The fixed engine (`--target democo-fixed`) | "The fix passes at level L3: rules, an independent human reference and the target agree at every evaluated point, plus 1,500 sampled amounts. That is sampling, not proof." | Exit 0, `Verification level: L3` | Pre-recorded take |
+| 2:05–2:30 | The evidence viewer in a browser (`python -m src.policyproof.demo --open`) | "Every conclusion is inspectable: which rule, which quote, which inputs, who said what, and what we can't establish." | The HTML page: headline, edges, the "not established" list | Show the static `artifacts/demo/evidence-*.html` already rendered |
+| 2:30–2:50 | `docs/BENCHMARK.md` results table | "We benchmarked the verifier itself against 26 seeded cases: zero false accusations, 13 of 15 defects found. It misses one-cent and 33-cent defects, and we say so. The benchmark also caught a bug in our own verifier, which we fixed." | 0/7 false accusations; 13/15 detection; the misses; verdicts 23/26 → 24/26 | Same, as a static slide made from the file |
+| 2:50–3:00 | `docs/HACKATHON_CONTRIBUTIONS.md` | "Muse proposes; PolicyProof verifies. All of this was built during the hackathon, with AI coding assistants, and the contribution log lists each piece and its evidence." | The inventory table and the provenance section | None |
+
+## Before recording
+
+- [ ] **Live take:** `META_MUSE_API_KEY` set in the recording shell only; not on screen, not in history and not in the report. Check that the first output line reads `LIVE:`.
+- [ ] Live output may differ from the saved response, because the model is not deterministic. Re-check that the $40.00 discrepancy still appears, and narrate what actually happens.
+- [ ] **Do not use the files in `artifacts/video/live-*.txt` as live footage.** They are **replays** of the saved response; their own first line says so.
+- [ ] Re-verify the Meta API requirements and the hackathon rules (permitted models, attribution) against the official sources on the recording day.
+- [ ] Provenance: records outside Git date all of `496bc75` to 2026-10-27 (see HACKATHON_CONTRIBUTIONS.md). Before saying the closing line, the author confirms it and names the tool that wrote the prototype.
+- [ ] Time the full run-through and keep it at 3:00 or under.
