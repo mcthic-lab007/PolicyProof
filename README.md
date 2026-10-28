@@ -358,7 +358,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 
 ## Benchmark
 
-`python -m benchmark.run` scores PolicyProof against a 26-case ground-truth corpus of correct, defective and failing targets and evidence scenarios. See [docs/BENCHMARK.md](docs/BENCHMARK.md) for the design, metrics, results and limitations. Current results on corpus v1: no false accusations (0/7), 13 of 15 defects detected, 24 of 26 exit codes as expected.
+`python -m benchmark.run` scores PolicyProof against a 27-case ground-truth corpus of correct, defective and failing targets and evidence scenarios. See [docs/BENCHMARK.md](docs/BENCHMARK.md) for the design, metrics, results and limitations. Current results on corpus v2: no false accusations (0/8), 12 of 15 defects confirmed, 25 of 27 exit codes as expected. A target that hangs is reported as unfinished rather than confirmed wrong; see the benchmark's corpus v2 section.
 
 What was built during the hackathon, and how Muse Spark is used, is documented in [docs/HACKATHON_CONTRIBUTIONS.md](docs/HACKATHON_CONTRIBUTIONS.md).
 
@@ -368,7 +368,7 @@ What was built during the hackathon, and how Muse Spark is used, is documented i
 .\.venv\Scripts\python.exe -B -m unittest discover -s tests -t . -v
 ```
 
-The suite has 369 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
+The suite has 373 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
 
 GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3.12 for every push and pull request.
 
