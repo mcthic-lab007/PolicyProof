@@ -121,7 +121,7 @@ Before the fix, a call that timed out or whose worker died had no decision. When
 | C: Muse Spark's proposed test amounts, policy only (replay of the one saved live response) | adds 0 points to A | — | — | — | — | — |
 
 - **B** finds `single-cent-777.77` and `narrow-literal-range` in 40 of 40 search-enabled sweep runs (previously 0 of 40), all exactly located.
-  - Both literal targets now exit 3; all other exit codes and levels are unchanged. Spurious claims stay at 0 (0/613 in the primary run, 0 in the sweep). Reproducible: yes.
+  - Both literal targets now exit 3; all other exit codes and levels are unchanged. Spurious claims stay at 0 (0/613 in the primary run, 0 in the sweep). Reproducible at `cbcad53`: yes. A review re-run at `e2f37b4` gave the same metrics and 26 of 27 identical reports; only the wall-clock-dependent `time-limit-exhausted` differed between its two passes.
   - In the primary run, B's 14/15 includes `narrow-computed-range`, found at the default seed exactly as with A. Over the sweep it is found in 1 of 10 seeds at budgets of 1000 and above, and 0 of 10 at 250, with or without B.
   - The remaining miss is `hangs-at-40`, which is by design (see corpus v2 above).
 - **C** was not run live: `META_MUSE_API_KEY` was not available this session.
