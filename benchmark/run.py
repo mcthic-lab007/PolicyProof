@@ -119,7 +119,8 @@ SOURCE_PROBES = True
 
 
 def run_case(case: Case, policy_text: str, *, isolated: bool, budget: int | None = None,
-             seed: int = DEFAULT_SEED) -> dict:
+             seed: int = DEFAULT_SEED, source_probes: bool | None = None,
+             proposed_probes: tuple = (), proposed_origin: str | None = None) -> dict:
     """Run one case and score its report. ``budget`` None: the case's own
     budget, or the CLI default."""
     if budget is None:
@@ -134,7 +135,8 @@ def run_case(case: Case, policy_text: str, *, isolated: bool, budget: int | None
         target_timeout=DEFAULT_TARGET_TIMEOUT if isolated else None,
         target_time_limit=case.options.get("target_time_limit", DEFAULT_TIME_LIMIT),
         required_level=case.options.get("required_level"),
-        source_probes=SOURCE_PROBES,
+        source_probes=SOURCE_PROBES if source_probes is None else source_probes,
+        proposed_probes=proposed_probes, proposed_probes_origin=proposed_origin,
     )
     seconds = time.perf_counter() - started
     text = result.to_json()

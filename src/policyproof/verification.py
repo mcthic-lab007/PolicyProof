@@ -271,6 +271,8 @@ def verify(
     target_time_limit: float = DEFAULT_TIME_LIMIT,
     required_level: str | None = None,
     source_probes: bool = True,
+    proposed_probes: tuple[Decimal, ...] = (),
+    proposed_probes_origin: str | None = None,
 ) -> VerificationResult:
     """Verify a rule document against ``policy_text``. The document is
     re-validated against this policy text first, so L0 never rests on where
@@ -331,6 +333,7 @@ def verify(
 
     outcome: SearchOutcome | None = None
     hints: SourceAmounts | None = None
+    proposed: tuple[Decimal, ...] = ()
     search_points: list[PointResult] = []
     try:
         results = tuple(
@@ -339,11 +342,12 @@ def verify(
         )
         findings += _findings(document, results, reference, target)
         if run_target is not None and search_budget > 0:
+            low, high = NUMERIC_DOMAINS["amount"]
             if source_probes:
-                low, high = NUMERIC_DOMAINS["amount"]
                 hints = source_amounts(target.decide, low, high)
+            proposed = tuple(sorted({a for a in proposed_probes if low <= a <= high}))
             outcome = _search(engine, results, reference, run_target, search_budget, search_seed,
-                              hints.amounts if hints else ())
+                              tuple(sorted(set(hints.amounts if hints else ()) | set(proposed))))
             range_findings, search_points = _range_findings(outcome, results, document, reference)
             findings += range_findings
             if outcome.unjudged:
@@ -366,7 +370,8 @@ def verify(
         excluded_points=list(derivation.excluded),
         points=[_point_record(result) for result in (*results, *search_points)],
         findings=[_finding_record(finding) for finding in findings],
-        target_search=_search_section(outcome, target, search_budget, reference, hints),
+        target_search=_search_section(outcome, target, search_budget, reference, hints,
+                                      proposed, proposed_probes_origin),
         target_execution=_execution_section(target, worker),
     )
     report["verification"]["result"] = verdict(findings, level, required_level)
@@ -816,7 +821,8 @@ def _execution_section(target, worker: TargetWorker | None) -> dict[str, Any]:
 
 
 def _search_section(outcome: SearchOutcome | None, target, budget, reference,
-                    hints: SourceAmounts | None = None) -> dict[str, Any]:
+                    hints: SourceAmounts | None = None, proposed: tuple[Decimal, ...] = (),
+                    proposed_origin: str | None = None) -> dict[str, Any]:
     if outcome is None:
         reason = "no target supplied" if target is None else "search budget is 0"
         return {"performed": False, "reason": reason}
@@ -840,6 +846,13 @@ def _search_section(outcome: SearchOutcome | None, target, budget, reference,
                     "side before the ladder. The source was parsed, never executed; a probe is "
                     "evidence only through the decisions actually observed there.",
         },
+        "proposed_amounts": {
+            "origin": proposed_origin or "unspecified",
+            "amounts": [str(a) for a in proposed],
+            "note": "Amounts proposed outside PolicyProof (for example by a model), probed with "
+                    "one cent either side like source amounts. A proposal is a place to look, "
+                    "not a finding: only the decisions observed there count.",
+        } if proposed else {"used": False},
         "strategy": (
             "For each value of has_service_date: amounts written in the target's source and "
             "one cent either side (when enabled), then a round-number ladder (1, 2, 2.5 and 5 x 10^k "

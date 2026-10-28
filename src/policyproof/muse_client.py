@@ -264,6 +264,11 @@ class MuseClient:
         body = self._post({"model": MODEL_ID, "input": build_prompt(policy_text)})
         return proposal_from_response(body, policy_text, source=SOURCE_LIVE)
 
+    def complete(self, prompt: str) -> dict[str, Any]:
+        """Send one prompt and return the raw response body, with the same
+        error handling and key redaction as propose_rules."""
+        return self._post({"model": MODEL_ID, "input": prompt})
+
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         transport = self._transport or requests.post
         headers = {"Authorization": f"Bearer {self._api_key}"}
