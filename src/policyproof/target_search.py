@@ -216,13 +216,18 @@ def _candidates(evaluated, low, high, rng, limit, hints=()) -> list[Decimal]:
         for amount in (hint - CENT, hint, hint + CENT):
             take(amount)
 
+    ladder = set()
     for mantissa in LADDER_MANTISSAS:
         for exponent in LADDER_EXPONENTS:
             value = (mantissa * Decimal(10) ** exponent).quantize(CENT)
             for amount in (value - CENT, value, value + CENT):
                 take(amount)
+                if amount in taken:
+                    ladder.add(amount)
 
-    anchors = sorted(set(evaluated) | set(chosen) | {low, high})
+    # Hints do not split the sampling bands, so sampling is laid out as it
+    # would be without them; they only use up part of the probe budget.
+    anchors = sorted(set(evaluated) | ladder | {low, high})
     bands = []
     for a, b in zip(anchors, anchors[1:]):
         lo_c, hi_c = _cents(a) + 1, _cents(b) - 1
