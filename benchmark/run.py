@@ -176,8 +176,10 @@ def score(case: Case, report: dict) -> dict:
             claims += 1
             spurious += case.discrepant(amount, dated) != says_discrepant
 
+    # Ground truth is relative to the policy reference, so points can only be
+    # scored in runs that use it.
     judged = correct_points = 0
-    for point in points.values():
+    for point in points.values() if case.options.get("reference", "democo") == "democo" else ():
         seen = disagrees(point)
         if seen is None:
             continue

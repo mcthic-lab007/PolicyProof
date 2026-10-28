@@ -251,6 +251,37 @@ class FailureHandlingTests(unittest.TestCase):
         self.assertEqual(ranges(result), [])  # never judged, so never reported
         self.assertNotEqual(result.level, "L3")
 
+    def test_unjudged_search_evaluations_block_l3_and_ok(self):
+        # Regression (benchmark corpus v1, time-limit-exhausted): every
+        # evaluated point was judged, but search calls that could not be
+        # judged were counted as agreement, giving L3 and exit 0.
+        def reference_fails_between_points(case):
+            if D("500.00") < case.amount < D("600.00"):
+                raise ValueError("no data")
+            return reference_engine(case)
+
+        result = run(TARGETS["democo-fixed"].decide,
+                     reference=Implementation("ref", "", reference_fails_between_points))
+        search = result.report["target_search"]
+        self.assertGreater(search["unjudged_evaluations"], 0)
+        unjudged = [f for f in result.findings if f.code == "UNSUPPORTED" and "could not be judged" in f.summary]
+        self.assertEqual(len(unjudged), 1)
+        details = unjudged[0].details
+        self.assertEqual(details["unjudged"], search["unjudged_evaluations"])
+        self.assertEqual(details["reasons"], {"reference produced no decision": details["unjudged"]})
+        self.assertTrue(D("500.00") < D(details["first_unjudged"]["amount"]) < D("600.00"))
+        self.assertEqual(unjudged[0].severity, "error")
+        self.assertEqual(result.level, "L2")
+        self.assertIn("could not be judged", result.report["verification"]["criteria"]["L3"]["detail"])
+        self.assertEqual(result.report["verification"]["result"]["exit_code"], 3)
+        self.assertFalse([c for c in result.codes() if c.startswith("TARGET_DISCREPANCY")])
+
+    def test_fully_judged_search_adds_no_unjudged_finding(self):
+        result = run(TARGETS["democo-fixed"].decide)
+        self.assertEqual(result.report["target_search"]["unjudged_evaluations"], 0)
+        self.assertEqual(result.codes(), ["CHECKED"])
+        self.assertEqual(result.level, "L3")
+
 
 class SearchAlgorithmTests(unittest.TestCase):
     """The search alone, against a plain predicate."""

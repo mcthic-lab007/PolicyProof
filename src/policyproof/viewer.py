@@ -257,7 +257,10 @@ def _search_summary(search: Any) -> str:
         "<p class=\"small\"><strong>Target search.</strong> "
         f"{_e(search.get('target_calls'))} target calls (budget {_e(search.get('budget'))}, seed "
         f"{_e(search.get('seed'))}) between the evaluated points; {_e(search.get('ranges_found'))} "
-        "discrepancy range(s) found. This is sampling, not exhaustive checking.</p>\n"
+        "discrepancy range(s) found"
+        + (f"; {_e(search.get('unjudged_evaluations'))} call(s) could not be judged, so nothing is "
+           "concluded there" if search.get("unjudged_evaluations") else "")
+        + ". This is sampling, not exhaustive checking.</p>\n"
     )
 
 

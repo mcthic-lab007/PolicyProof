@@ -22,7 +22,10 @@ Findings (exact conditions):
                        supplied policy text, whatever its origin.
   UNSUPPORTED          the interpreter cannot run the document, derivation
                        exceeds its limit, a policy amount cannot be used as
-                       a threshold, or the reference fails at a point.
+                       a threshold, the reference fails at a point, the
+                       target was not evaluated at a point, or target-search
+                       evaluations could not be judged (an error: L3 is not
+                       claimed for a search that was partly not judged).
   COVERAGE_GAP         no rule decides a point (status NO_MATCH). Other
                        perspectives at such points are listed in its details
                        instead of producing further findings.
@@ -328,6 +331,8 @@ def verify(
             outcome = _search(engine, results, reference, run_target, search_budget, search_seed)
             range_findings, search_points = _range_findings(outcome, results, document, reference)
             findings += range_findings
+            if outcome.unjudged:
+                findings.append(_unjudged_finding(outcome))
     finally:
         if worker is not None:
             worker.close()  # also on KeyboardInterrupt: never leave a worker behind
@@ -708,6 +713,36 @@ def _range_findings(outcome: SearchOutcome, results, document, reference):
     return findings, list(points.values())
 
 
+def _unjudged_finding(outcome: SearchOutcome) -> Finding:
+    """Search calls that produced no judgement: the target was not run (time
+    limit, worker start), the reference gave no decision, or there was no
+    decided basis. Without this, agreement would be claimed for them."""
+    reasons: dict[str, int] = {}
+    for key in outcome.unjudged_inputs:
+        _, ref, tgt = outcome.observations[key].payload
+        if tgt.failure in NOT_EVALUATED:
+            reason = f"target {tgt.failure}"
+        elif ref is not None and ref.decision is None:
+            reason = "reference produced no decision"
+        else:
+            reason = "no decided comparison basis"
+        reasons[reason] = reasons.get(reason, 0) + 1
+    first = outcome.unjudged_inputs[0]
+    return Finding(
+        "UNSUPPORTED", "error",
+        f"Target search: {outcome.unjudged} of {outcome.calls} search evaluations could not be "
+        "judged (" + ", ".join(f"{n} {reason}" for reason, n in sorted(reasons.items()))
+        + "). Nothing is concluded about the target at those amounts, so agreement is not "
+        "claimed for the search.",
+        details={
+            "unjudged": outcome.unjudged,
+            "search_evaluations": outcome.calls,
+            "reasons": reasons,
+            "first_unjudged": {"amount": str(first[0]), "has_service_date": first[1]},
+        },
+    )
+
+
 def _range_summary(found, code, evaluation, ref, tgt, rules) -> str:
     lower, upper = found.lower, found.upper
     where = "with" if found.has_service_date else "without"
@@ -1037,7 +1072,8 @@ def _level(results, findings, reference, target, outcome=None):
         and r.evaluation.decision == r.reference.decision
         for r in results
     )
-    target_ok = target is not None and reference is not None and not ranges and all(
+    unjudged = outcome.unjudged if outcome is not None else 0
+    target_ok = target is not None and reference is not None and not ranges and not unjudged and all(
         r.target.decision is not None and r.target.decision == r.reference.decision
         for r in results
     )
@@ -1061,6 +1097,8 @@ def _level(results, findings, reference, target, outcome=None):
                "no reference to compare the target with" if reference is None else
                f"target agrees with the reference at every evaluated point{searched}" if target_ok
                else f"the target was not evaluated at {skipped} point(s)" if skipped
+               else f"{unjudged} of {outcome.calls} target-search evaluations could not be judged"
+               if unjudged
                else f"target search found {len(ranges)} range(s) where the target disagrees"
                if ranges else "target does not agree with the reference at every evaluated point"},
     }
@@ -1074,9 +1112,10 @@ def _level(results, findings, reference, target, outcome=None):
 
 def _verification_section(level, criteria, point_count, outcome=None) -> dict[str, Any]:
     searched = "" if outcome is None else (
-        f" In addition, the target was evaluated at {outcome.calls} amounts chosen by a seeded "
-        f"search (seed {outcome.seed}, budget {outcome.budget}) between those points; that is "
-        "sampling, not exhaustive checking."
+        f" In addition, the target was called at {outcome.calls} amounts chosen by a seeded "
+        f"search (seed {outcome.seed}, budget {outcome.budget}) between those points"
+        + (f", of which {outcome.unjudged} could not be judged" if outcome.unjudged else "")
+        + "; that is sampling, not exhaustive checking."
     )
     return {
         "level": level,
@@ -1301,7 +1340,8 @@ def _print_summary(result: VerificationResult) -> None:
         print(f"Target search: {search['target_calls']} target calls "
               f"({search['probe_calls']} probes, {search['bisection_calls']} bisection) of a "
               f"budget of {search['budget']}, seed {search['seed']}; "
-              f"{search['ranges_found']} discrepancy range(s) found. Sampling, not exhaustive.")
+              f"{search['ranges_found']} discrepancy range(s) found, "
+              f"{search['unjudged_evaluations']} evaluation(s) not judged. Sampling, not exhaustive.")
     for finding in result.findings:
         points = f" [{', '.join(finding.points)}]" if finding.points and finding.code != "CHECKED" else ""
         print(f"{finding.severity.upper():<7} {finding.code}: {finding.summary}{points}")
