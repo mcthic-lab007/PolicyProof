@@ -129,10 +129,17 @@ def targets() -> dict[str, str]:
     return {spec: re.sub(r"[^a-z0-9]+", "-", spec.lower()).strip("-") for spec in specs}
 
 
-def record(client: MuseClient, policy_text: str, out_dir: Path, trials: int) -> list[Path]:
-    """LIVE calls: one per target and trial. Existing files are never replaced."""
+def record(client: MuseClient, policy_text: str, out_dir: Path, trials: int,
+           only: str | None = None) -> list[Path]:
+    """LIVE calls: one per target and trial (``only``: that target alone, for
+    a pilot). Existing files are never replaced."""
+    known = targets()
+    if only is not None and only not in known:
+        raise ValueError(f"unknown target {only!r}; corpus targets: {', '.join(known)}")
     saved = []
-    for spec, name in targets().items():
+    for spec, name in known.items():
+        if only is not None and spec != only:
+            continue
         code = source_excerpt(bench._import(spec)) if _importable(spec) else None
         if code is None:
             continue  # nothing to show Muse (for example, the import-failure target)
@@ -217,6 +224,8 @@ def main(argv: list[str] | None = None) -> int:
     rec = sub.add_parser("record", help="LIVE: ask Muse Spark for probe amounts and save them")
     rec.add_argument("--trials", type=int, default=3)
     rec.add_argument("--dir", type=Path, default=DEFAULT_DIR)
+    rec.add_argument("--target", help="record this corpus target only (a pilot), e.g. "
+                     "benchmark.targets:narrow_computed_range")
     ev = sub.add_parser("evaluate", help="OFFLINE: score saved proposals on the frozen corpus")
     ev.add_argument("--dir", type=Path, default=DEFAULT_DIR)
     ev.add_argument("--output", type=Path, required=True)
@@ -231,11 +240,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}; no call was made", file=sys.stderr)
             return 1
         try:
-            saved = record(client, policy_text, args.dir, args.trials)
-        except MuseClientError as exc:
+            saved = record(client, policy_text, args.dir, args.trials, args.target)
+        except (MuseClientError, ValueError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         print(f"LIVE: saved {len(saved)} new Muse Spark response(s) under {args.dir}")
+        for path in saved:
+            body = json.loads(path.read_text(encoding="utf-8"))
+            usage = body.get("usage") or {}
+            print(f"  {path.relative_to(args.dir)}: response id {body.get('id')}, model "
+                  f"{body.get('model')}, status {body.get('status')}, input tokens "
+                  f"{usage.get('input_tokens')}, output tokens {usage.get('output_tokens')}")
         return 0
 
     try:

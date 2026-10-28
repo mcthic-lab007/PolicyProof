@@ -149,3 +149,18 @@ No log was kept that day; this entry is reconstructed from the commit history on
 1. With the key set in one shell, run `python -m benchmark.muse_probes record` (63 calls by default; check the cost first).
 2. Then run `evaluate`, and report C and D against A and B.
 3. Review the two branches in order.
+
+## 2026-10-28 (sixth session): live pilot blocked; pilot path and cost estimate prepared
+
+**Start state (verified):** `master` = `origin/master` = `ba916b8`. `feat/source-literal-probes` = `3b90f85` and `feat/muse-probe-experiment` = `fdcf289`, both matching their remotes and clean. The B branch is an ancestor of the experiment branch.
+
+**Live call: none.** `META_MUSE_API_KEY` is not set at process, user or machine scope.
+
+**Done:**
+- Added `record --target` for a one-call pilot, with a test, and a token summary printed after each live call.
+- Dry-ran `evaluate` on one labelled synthetic file: refused without `--allow-synthetic`, then labelled `REPLAY_SYNTHETIC`. The proposed edge located the computed range, and the fixed engine stayed at L3. One trial takes about 33 s.
+- **Pricing:** checked against Meta's pricing page. Cost estimated from real prompt sizes; see BENCHMARK.md.
+
+**Next decision (the author's):**
+1. Set the key in one shell and run the one-call pilot (about $0.03–$0.13 estimated).
+2. After the pilot's measured usage, decide on the full 63 calls (about $1.70–$8.40 estimated) and choose the tier. Contributor mode is cheaper but allows Meta to use the content for training.

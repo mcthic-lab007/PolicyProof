@@ -102,6 +102,23 @@ class RecordTests(unittest.TestCase):
             self.assertEqual(len(saved), len(calls))
 
 
+    def test_pilot_records_one_target_only(self):
+        calls = []
+
+        def transport(url, **kwargs):
+            calls.append(kwargs["json"]["input"])
+            return FakeResponse(body_for(["2000.37"], note=False))
+        client = MuseClient(FAKE_KEY, transport=transport)
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = mp.record(client, POLICY_TEXT, Path(tmp), trials=1,
+                              only="benchmark.targets:narrow_computed_range")
+            self.assertEqual((len(saved), len(calls)), (1, 1))
+            self.assertIn("_LOW = _BASE + Decimal(37) * CENT", calls[0])
+            with self.assertRaises(ValueError):
+                mp.record(client, POLICY_TEXT, Path(tmp), trials=1, only="no.such:target")
+            self.assertEqual(len(calls), 1)
+
+
 class EvaluateTests(unittest.TestCase):
     def write(self, tmp, spec, body, trial=1):
         path = Path(tmp) / mp.targets()[spec] / f"trial-{trial}.json"

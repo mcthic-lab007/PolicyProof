@@ -153,6 +153,18 @@ Before the fix, a call that timed out or whose worker died had no decision. When
 - **Must hold:** 0/8 false accusations.
 - **Also reported:** detection; exact location; new unique probes beyond the derived points, the ladder and B; search calls; tokens from `usage`; and, per target, agreement between trials.
 - **What any result can and cannot show:** a proposal is only a probe. Every finding still comes from the target's and the reference's observed decisions. A Muse success on this corpus would show that it can reason about this code. It would not show reliability on real engines.
+- **Cost estimate (2026-10-28):** Meta's pricing page lists `muse-spark-1.3` standard mode at $1.25 per million input tokens, $0.15 cached input and $4.25 output. It doesn't say whether reasoning tokens are billed. The one saved live response counted its 5,525 reasoning tokens inside `output_tokens` (6,231), so this estimate assumes they are billed as output.
+  - **Input:** the probe prompts are 1,774 to 1,999 characters. At the 4.27 characters per token measured on the saved call, that is about 465 tokens for the pilot and about 9,180 for all 21 targets per trial.
+  - **Output** is the uncertain part.
+
+  | Output tokens per call | Pilot (1 call) | Full run (63 calls) |
+  |---|---|---|
+  | Same as the saved response | about $0.03 | about $1.70 |
+  | 2 × | about $0.05 | about $3.37 |
+  | 5 × | about $0.13 | about $8.38 |
+
+  These are estimates, not measurements. The pilot's `usage` record will replace the output assumption.
+- **Pilot first:** `python -m benchmark.muse_probes record --target benchmark.targets:narrow_computed_range --trials 1` makes exactly one live call. The full run waits for a cost review.
 - **Commands:**
   1. `python -m benchmark.muse_probes record`, with the key set in that shell only;
   2. `python -m benchmark.muse_probes evaluate --output artifacts/benchmark/muse-probes.json`.
