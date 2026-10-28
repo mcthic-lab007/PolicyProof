@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 
-CORPUS_VERSION = "1"
+CORPUS_VERSION = "2"  # v2 adds slow-correct-at-threshold; v1 cases unchanged
 CORRECT, DEFECT, FAILURE, SCENARIO = "correct", "defect", "execution_failure", "scenario"
 
 Interval = tuple[bool, Decimal, Decimal]
@@ -139,6 +139,9 @@ CASES: tuple[Case, ...] = (
     Case("time-limit-exhausted", SCENARIO, T + "slow_correct",
          "correct but slow; the total target-time limit cuts the search short", 3,
          options={"target_time_limit": 2.0}),
+    Case("slow-correct-at-threshold", SCENARIO, T + "slow_at_threshold",
+         "correct, but one call outlasts the per-call timeout: an unfinished call "
+         "is not evidence of a wrong decision", 3, must_not_confirm=True),
     Case("loophole-budget-0", SCENARIO, "examples.loophole_engine:evaluate_meal_claim",
          "search disabled: the loophole is invisible by contract", 0,
          (_iv(True, "1000.00", "4999.99"),), options={"search_budget": 0},

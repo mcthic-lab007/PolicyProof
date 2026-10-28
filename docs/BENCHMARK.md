@@ -2,7 +2,7 @@
 
 A small, deterministic ground-truth corpus that measures how well PolicyProof's own verification machinery finds seeded defects, avoids false accusations, and classifies runs it cannot fully judge. It was built on 2026-10-28 during the hackathon.
 
-**Scope:** 26 synthetic cases against the fictional DemoCo meal policy. These results describe this corpus only. They are not a measure of production reliability, and they say nothing about other policies or schemas.
+**Scope:** 26 synthetic cases (corpus v1), 27 in corpus v2 against the fictional DemoCo meal policy. These results describe this corpus only. They are not a measure of production reliability, and they say nothing about other policies or schemas.
 
 ## Reproduce
 
@@ -23,6 +23,8 @@ The corpus was committed in `8d3b337` **before** any measurement. The ground tru
 | execution failure | 4 | An exception above $500, a hang at $40.00, the lowercase `"approve"`, and an import failure. The import failure must not be accused. |
 | scenario | 6 | No reference, a contradicting model expectation, a conflicting reference, `--require-level L3` without a reference, an exhausted total time limit, and search budget 0. |
 
+**Corpus v2** (`f21e7b0`, committed before its first measurement) adds one scenario: `slow-correct-at-threshold`. Its target is correct everywhere but takes 3 s for dated $40.00, longer than the 2 s per-call timeout. It must not be confirmed, so the false-accusation denominator becomes 8. It expects exit 3, because the run is incomplete. In the same commit, the scorer stopped counting timed-out or crashed calls as judgements of the target, for both the before and after measurements. The v1 cases are unchanged.
+
 ## Metrics (defined before the first run)
 
 | Metric | Numerator / denominator |
@@ -39,6 +41,8 @@ The corpus was committed in `8d3b337` **before** any measurement. The ground tru
 Primary configuration: CLI defaults, meaning an isolated worker with a 2 s per-call timeout, search budget 2000 and seed 20261104. The sweep covers the 12 defect cases in-process at budgets {0, 250, 1000, 2000, 8000}, each with 10 seeds (20261104 and 1–9).
 
 ## Results
+
+The first table below is corpus v1 (26 cases). Corpus v2 results come after it, under "Corpus v2: calls that do not finish"; v1 and v2 numbers are not directly comparable.
 
 Environment: Python 3.12.14, Windows 11 (10.0.26200), corpus v1.
 
@@ -71,6 +75,35 @@ The baseline ran in a temporary worktree at `8d3b337` with one harness change: t
 - Six regression tests in `tests/test_target_search.py`. Five fail without the change. The sixth already passed at the default seed and guards the result.
 - **First version was incomplete.** The first implementation reported such a run only if bisection made a call. That left `off-by-one-cent` at 9/10 seeds at budget 8000: a probe landed on $40.02, so no bisection was needed, and the agreeing neighbour never reached the report. The rule now counts any search evaluation. A test pins the case down using the $50.00 ladder probe. The table shows the corrected version.
 - **Reproducibility:** in all three post-change benchmark runs, the two primary passes differed only in `time-limit-exhausted`. That case's not-run count depends on wall-clock time: 1421, 1423 and 1424 were observed. Both of its observed report hashes also occur with the pre-change code. In three pre-change runs the two passes happened to match. This difference in frequency is not explained. The case has no ranges, so the change doesn't touch its report content. Its exit code is 3 in every run.
+
+### Corpus v2: calls that do not finish (`3def8c0`)
+
+Before the fix, a call that timed out or whose worker died had no decision. When the reference decided, that was a confirmed discrepancy, so a correct but slow target was accused. Now timeouts and worker crashes count as **not evaluated**, like calls skipped by the time limit. They produce an `UNSUPPORTED` error with a count for each failure kind. The run exits 3 and cannot reach L3, and nothing is confirmed. A call that finished by raising, or by returning something other than a decision, is still the target's answer. Configuration, seed and budgets are identical in both runs.
+
+| Metric (corpus v2) | Before: `f21e7b0` | After: `3def8c0` |
+|---|---|---|
+| False accusations | **1/8** (`slow-correct-at-threshold`) | **0/8** |
+| Spurious claims | 1/607 | 0/605 |
+| Detection | 13/15 | 12/15 |
+| Interval recall / exact location | 13/15 / 12/15 | 12/15 / 12/15 |
+| Point accuracy | 744/744 | 744/744 |
+| Verdict accuracy | 25/27 | 25/27 |
+| Reproducible | yes | yes |
+| Search calls / wall time | 39,546 / 15.9 s | 39,546 / 16.1 s |
+
+- **The trade-off is deliberate.** `hangs-at-40` (it never returns for $40.00) was a confirmed detection and is now reported as unfinished, so detection drops from 13/15 to 12/15. Its exit code is still 3. Seen from outside, a hang and a correct target slower than the timeout look the same: no answer within 2 s. One observation can't be a confirmed violation in one case and innocent in the other. The ground truth still says `hangs-at-40` is defective, so the metric counts it as a miss. That was not changed.
+- Exact location is 12/15 in both columns, not v1's 13/15. The scorer no longer treats the timed-out $40.00 in `hangs-at-40` as judged.
+- 23 of 27 primary reports are byte-identical. Of the other four:
+  - `slow-correct-at-threshold` and `hangs-at-40`: `TARGET_DISCREPANCY_CONFIRMED` is replaced by `UNSUPPORTED`;
+  - `import-fails` and `time-limit-exhausted`: only the finding text changed, which now counts failures by kind.
+
+  Exit codes and levels are unchanged in all 27 cases. The sweep runs in-process, where there are no timeouts, and is unchanged.
+- **Public behaviour change:** with no reference, a hang used to exit 4 (`TARGET_DISCREPANCY_MODEL_ONLY`) and now exits 3 (`UNSUPPORTED`).
+- **Regression tests (`tests/test_target_worker.py`):**
+  - Four are new: a slow correct target, a real discrepancy next to a timeout, and a timeout during the search all fail without the fix. The fourth, a long enough `--target-timeout` letting the slow target reach L3, already passed.
+  - Three existing tests for a hang, an always-hanging target and a crash asserted the old behaviour and were updated. All three fail on the old code.
+  - `tests/test_semantics.py` changes its hang and crash expectations from `CONFIRMED` to `UNSUPPORTED`.
+  - The viewer test now also checks that unfinished calls aren't described as agreement.
 
 ### Budget and seed sweep (defect group, intervals found / exactly located)
 
@@ -105,7 +138,7 @@ The rows above are from before `b434796`; this sweep is identical before and aft
 - **Ground truth:** it is declared, then checked at edges and samples, not exhaustively over about 200 million inputs.
 - **Scorer fix after the first run:** the first baseline scored points in `conflicting-reference` against that run's deliberately conflicting reference instead of the ground truth, which gave 744/745. That is a harness bug. It was fixed and the baseline was re-run on the unmodified verifier before any comparison. No ground truth or expected verdict was changed.
 - **Timing dependence:** `time-limit-exhausted` and `hangs-at-40` depend on wall-clock time. The not-run count was 1421 in these runs and 1422 in one earlier run, so their reports are reproducible only per machine and load. Every other case is deterministic.
-- **Timeouts count as wrong answers:** a call that exceeds the per-call timeout (default 2 s) gets no decision, so it is a confirmed discrepancy when the reference decides. The report states the failure kind, but a correct target that is slower than the timeout would still be reported as wrong. `hangs-at-40` relies on this. The corpus has no correct-but-slow-per-call case, so the false-accusation rate does not cover it.
+- **Timeouts (fixed in `3def8c0`):** until corpus v2, a timeout was a confirmed discrepancy, and a correct but slow target would have been reported as wrong. A timeout is now not evaluated. What remains: a target that is genuinely slow everywhere is reported as unfinished, never as correct, until `--target-timeout` is raised. The 2 s default is not tuned to any real engine.
 - **Platform:** all runs were on Windows. CI covers the unit tests on Linux, but it does not run the benchmark.
 
 ## Ranked next improvements (from this evidence)
@@ -114,4 +147,4 @@ The rows above are from before `b434796`; this sweep is identical before and aft
 2. **Close the narrow-defect gap** (0 of 40 search-enabled runs for the single cent and the 33-cent range). There are two candidates, and both should be measured on this corpus, including the computed-edge hold-out:
    - mine numeric literals from the target's source (deterministic grey-box probing). It should catch the two literal cases but not the computed range;
    - have **Muse Spark propose adversarial probe amounts**, which PolicyProof then judges. Muse could only add test points, never decide an outcome. Replayed responses would keep the benchmark reproducible.
-3. **Open: stop counting timeouts as wrong answers.** A correct target slower than the per-call timeout is falsely accused today (see Threats to validity). First add a correct-but-slow-per-call case to the corpus. Then classify timeouts as not evaluated, or as their own unconfirmed outcome, and measure the change.
+3. ~~Stop counting timeouts as wrong answers.~~ Done in `3def8c0` (corpus v2); see above.

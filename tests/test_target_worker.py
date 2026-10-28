@@ -176,9 +176,10 @@ class IsolatedVerificationTests(unittest.TestCase):
         started = time.monotonic()
         result = self.run_isolated(isolated("hangs_at_forty"), search_budget=200)
         elapsed = time.monotonic() - started
-        confirmed = [f for f in result.findings if f.code == "TARGET_DISCREPANCY_CONFIRMED"]
-        self.assertEqual([f.points for f in confirmed], [("point-40.00-dated",)])
-        self.assertIn("timed out after 0.5 s", confirmed[0].details["target_error"])
+        self.assertFalse([c for c in result.codes() if c.startswith("TARGET_DISCREPANCY")])
+        [unfinished] = self.unfinished(result)
+        self.assertEqual(unfinished.points, ("point-40.00-dated",))
+        self.assertIn("timed out after 0.5 s", unfinished.details["errors"]["point-40.00-dated"])
         point = next(p for p in result.report["points"] if p["id"] == "point-40.00-dated")
         self.assertEqual(point["target"]["failure"], "timeout")
         execution = result.report["target_execution"]
@@ -199,11 +200,12 @@ class IsolatedVerificationTests(unittest.TestCase):
         not_evaluated = [f for f in result.findings
                          if f.code == "UNSUPPORTED" and "not evaluated" in f.summary]
         self.assertEqual(len(not_evaluated), 1)
-        # Calls that timed out are failures of the target; skipped ones are not judged.
+        # Neither timed-out nor skipped calls are judgements of the target.
         timed_out = [p for p in result.report["points"] if (p["target"] or {}).get("failure") == "timeout"]
         skipped = [p for p in result.report["points"] if (p["target"] or {}).get("failure") == "not_run"]
         self.assertTrue(timed_out and skipped)
-        self.assertEqual(set(not_evaluated[0].points), {p["id"] for p in skipped})
+        self.assertEqual(set(not_evaluated[0].points), {p["id"] for p in timed_out + skipped})
+        self.assertFalse([c for c in result.codes() if c.startswith("TARGET_DISCREPANCY")])
         self.assertFalse(any(f.details.get("kind") == "range" for f in result.findings))
         self.assertNotEqual(result.level, "L3")
         self.assertIn("not evaluated", result.report["verification"]["criteria"]["L3"]["detail"])
@@ -230,11 +232,55 @@ class IsolatedVerificationTests(unittest.TestCase):
         self.assertEqual(result.report["target_execution"]["worker_starts"], 1)
         self.assertEqual(result.level, "L2")
 
-    def test_crashing_target_is_a_confirmed_failure_at_that_point(self):
+    def test_crashing_target_is_an_unfinished_call_at_that_point(self):
         result = self.run_isolated(isolated("crashes_at_forty"), search_budget=100)
+        self.assertFalse([c for c in result.codes() if c.startswith("TARGET_DISCREPANCY")])
+        [unfinished] = self.unfinished(result)
+        self.assertEqual(unfinished.points, ("point-40.00-dated",))
+        self.assertEqual(unfinished.details["failures"], {"worker_crash": 1})
+        self.assertIn("exited (code 7)", unfinished.details["errors"]["point-40.00-dated"])
+        self.assertEqual(result.report["verification"]["result"]["exit_code"], 3)
+
+    def unfinished(self, result):
+        return [f for f in result.findings if f.code == "UNSUPPORTED" and "not evaluated" in f.summary]
+
+    def test_slow_correct_target_is_not_accused(self):
+        # Regression (benchmark corpus v2, slow-correct-at-threshold): a call
+        # that outlasted the timeout was a confirmed discrepancy, so a correct
+        # target slower than the timeout was accused of a wrong decision.
+        result = self.run_isolated(isolated("slow_at_forty"), search_budget=50)
+        self.assertFalse([c for c in result.codes() if c.startswith("TARGET_DISCREPANCY")])
+        [finding] = self.unfinished(result)
+        self.assertEqual(finding.points, ("point-40.00-dated",))
+        self.assertEqual(finding.details["failures"], {"timeout": 1})
+        self.assertIn("timed out after 0.5 s", finding.summary)
+        self.assertIn("not evidence", finding.summary)
+        self.assertNotEqual(result.level, "L3")
+        self.assertIn("not evaluated", result.report["verification"]["criteria"]["L3"]["detail"])
+        self.assertEqual(result.report["verification"]["result"]["exit_code"], 3)
+
+    def test_a_long_enough_timeout_lets_the_slow_target_reach_l3(self):
+        result = self.run_isolated(isolated("slow_at_forty"), target_timeout=2.0, search_budget=50)
+        self.assertEqual((result.level, result.report["verification"]["result"]["exit_code"]), ("L3", 0))
+
+    def test_completed_discrepancies_stay_confirmed_next_to_a_timeout(self):
+        result = self.run_isolated(isolated("wrong_below_slow_at_forty"), search_budget=50)
         confirmed = [f for f in result.findings if f.code == "TARGET_DISCREPANCY_CONFIRMED"]
-        self.assertEqual([f.points for f in confirmed], [("point-40.00-dated",)])
-        self.assertIn("exited (code 7)", confirmed[0].details["target_error"])
+        self.assertEqual([f.points for f in confirmed if f.details.get("kind") != "range"],
+                         [("point-39.99-dated",)])
+        self.assertEqual(self.unfinished(result)[0].points, ("point-40.00-dated",))
+        # The unfinished $40.00 call cannot verify the edge between $39.99 and $40.01.
+        [found] = [f for f in confirmed if f.details.get("kind") == "range"]
+        self.assertEqual((found.details["end"], found.details["agrees_above"]), ("39.99", "40.01"))
+        self.assertFalse(found.details["upper_edge_verified"])
+        self.assertEqual(result.report["verification"]["result"]["exit_code"], 3)
+
+    def test_search_timeouts_are_unjudged_not_ranges(self):
+        result = self.run_isolated(isolated("hangs_at_a_thousand"), search_budget=100)
+        self.assertFalse([c for c in result.codes() if c.startswith("TARGET_DISCREPANCY")])
+        [unjudged] = [f for f in result.findings if f.code == "UNSUPPORTED" and "could not be judged" in f.summary]
+        self.assertEqual(unjudged.details["reasons"], {"target timeout": 1})
+        self.assertNotEqual(result.level, "L3")
 
     def test_isolated_and_in_process_runs_agree(self):
         for name in ("democo-buggy", "democo-fixed", "democo-loophole"):

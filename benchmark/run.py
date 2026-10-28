@@ -145,7 +145,9 @@ def score(case: Case, report: dict) -> dict:
 
     def disagrees(point) -> bool | None:
         ref, tgt = point["reference"], point["target"]
-        if tgt is None or tgt.get("failure") in ("not_run", "worker_startup"):
+        # An unfinished call (skipped, never started, timed out, worker died)
+        # is no judgement of the target, whatever the verifier made of it.
+        if tgt is None or tgt.get("failure") in ("not_run", "worker_startup", "timeout", "worker_crash"):
             return None
         if ref is None:
             return None

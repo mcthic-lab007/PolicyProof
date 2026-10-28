@@ -206,7 +206,7 @@ In this demo, all four edge amounts are round-number probes (step 1 below), so n
 The CLI runs the target in a separate worker process (`src/policyproof/target_worker.py`), never inside the verifier:
 - **Timeouts:** a call that doesn't answer within `--target-timeout` seconds (default 2) is abandoned, and the worker is killed and restarted. The outcome is recorded as `timeout`.
 - **Crashes:** a target that exits the process or writes garbage over the protocol is recorded as `worker_crash`.
-- **Both count as the target failing at that input,** so with an agreeing reference and rules they are confirmed discrepancies, like a wrong decision.
+- **Neither counts as a wrong decision.** A call that never finished is reported as **not evaluated** (`UNSUPPORTED`, an error, so exit 3), with its cause and a count per kind. A timeout can't tell a hang from a correct but slow target, and a dead worker can't tell a target bug from the environment. A discrepancy established by calls that did finish stays confirmed. Raise `--target-timeout` (at most 60 s) if your target is legitimately slow.
 - **Total time limit:** `--target-time-limit` (default 120 s) caps the time spent on target calls. Calls after that are skipped, and reported as **not evaluated** (`UNSUPPORTED`), never as wrong.
 - **Targets that can't start:** if the target can't even be imported, it's started once, and every point is reported as not evaluated.
 - **Ctrl+C** stops the run and kills the worker.
@@ -328,8 +328,8 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 - **No dynamic execution.** Model output is parsed as data and checked against allowlists; there is no `eval`, `exec` or generated code. Tests check this by parsing the source.
 - **Allowlisted targets only.** `--reference` and `--target` accept fixed names (`democo-meal`, `democo-buggy`, `democo-fixed`, `democo-loophole`) that map to local code. Nothing proposed by the model is ever executed.
 - **Target failures are recorded, not fatal:**
-  - a target that raises an exception, calls `sys.exit()`, returns something other than a decision, times out or crashes its worker is recorded as disagreeing at that input;
-  - a target that couldn't be run at all (time limit reached, or it can't be imported) is recorded as not evaluated;
+  - a target that raises an exception, calls `sys.exit()` or returns something other than a decision has answered, and is recorded as disagreeing at that input;
+  - a call that never finished (it timed out, its worker crashed, the time limit was reached, or the target can't be imported) is recorded as not evaluated, never as a wrong decision;
   - Ctrl+C stops the run.
   - In the worker, a `KeyboardInterrupt` raised by the target itself only ends that worker and is reported as a crash.
 - **Provenance labels.** Every result is labelled `LIVE`, `REPLAY_SAVED_LIVE_RESPONSE`, `REPLAY_SYNTHETIC` or `REPLAY_UNKNOWN_ORIGIN`. The labels come from the call path or the file and are **not** cryptographic proof of origin.
@@ -346,7 +346,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 - **Target execution:** by default the CLI runs the target in a worker process with a per-call timeout and a total time limit. That protects the verifier from hangs and crashes, but it isn't a security sandbox, so only trusted local code can be selected.
   - The reference still runs in-process.
   - Worker isolation has been tested on Windows only; CI covers Linux once the branch is pushed.
-  - **A timeout counts as a wrong answer (open, not solved).** A call that exceeds `--target-timeout` (default 2 s) gets no decision, and when the reference decides, that is reported as `TARGET_DISCREPANCY_CONFIRMED`. The finding states the cause ("no decision (timed out after 2 s; the worker process was killed)"). However, a correct target that is slower than the timeout would be falsely accused. The benchmark has no such case. Until this is fixed, raise `--target-timeout` for slow targets.
+  - **Timeouts are not evaluations.** Until 2026-10-28, a correct target slower than `--target-timeout` was falsely accused. Now a timed-out call is reported as not evaluated: the run exits 3, below L3, and is never confirmed as wrong. The trade-off is that a target that genuinely hangs is no longer *confirmed* wrong at that input; it is reported as unfinished instead. Exit-code change: with no reference, a hang used to exit 4 (`TARGET_DISCREPANCY_MODEL_ONLY`) and now exits 3 (`UNSUPPORTED`). Exceptions and non-decision return values still count as the target's answer and can be confirmed; the failure kind is recorded with the finding.
 - **Target search:** it samples within a budget, as described above, and can miss isolated faulty amounts. In the [benchmark](docs/BENCHMARK.md), a single wrong cent and a 33-cent range were missed in all 40 search-enabled runs (budgets 250 to 8000, 10 seeds each). A discrepancy found at an evaluated point is bisected to its edges like any other range, as long as the search budget isn't 0. A verified edge means both cents were evaluated; amounts inside a range are sampled, not all checked. Search calls that cannot be judged (for example, skipped by the time limit) produce an error finding and block L3.
 - **Live API contract:** the request and success-response shape were confirmed by one live call. Refusal, error and incomplete-response shapes follow the OpenAI-compatible format and haven't been seen live. The client makes no retries and the 120-second timeout applies per read, not to the whole request.
 - **Legacy modules:** `verifier.py`, `reporting.py` and `generator.py` are the original prototype and are kept for their existing tests.
@@ -358,7 +358,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 
 ## Benchmark
 
-`python -m benchmark.run` scores PolicyProof against a 26-case ground-truth corpus of correct, defective and failing targets and evidence scenarios. See [docs/BENCHMARK.md](docs/BENCHMARK.md) for the design, metrics, results and limitations. Current results on corpus v1: no false accusations (0/7), 13 of 15 defects detected, 24 of 26 exit codes as expected.
+`python -m benchmark.run` scores PolicyProof against a 27-case ground-truth corpus of correct, defective and failing targets and evidence scenarios. See [docs/BENCHMARK.md](docs/BENCHMARK.md) for the design, metrics, results and limitations. Current results on corpus v2: no false accusations (0/8), 12 of 15 defects confirmed, 25 of 27 exit codes as expected. A target that hangs is reported as unfinished rather than confirmed wrong; see the benchmark's corpus v2 section.
 
 What was built during the hackathon, and how Muse Spark is used, is documented in [docs/HACKATHON_CONTRIBUTIONS.md](docs/HACKATHON_CONTRIBUTIONS.md).
 
@@ -368,7 +368,7 @@ What was built during the hackathon, and how Muse Spark is used, is documented i
 .\.venv\Scripts\python.exe -B -m unittest discover -s tests -t . -v
 ```
 
-The suite has 369 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
+The suite has 373 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
 
 GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3.12 for every push and pull request.
 

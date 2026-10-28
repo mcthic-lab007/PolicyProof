@@ -31,6 +31,28 @@ def slow(case):
     return correct(case)
 
 
+def slow_at_forty(case):
+    """Correct, but takes 1 s for dated $40.00."""
+    if _at_forty(case):
+        time.sleep(1.0)
+    return correct(case)
+
+
+def wrong_below_slow_at_forty(case):
+    """Wrong at dated $39.99 and takes 1 s for dated $40.00."""
+    if case.has_service_date and case.amount == Decimal("39.99"):
+        return "REJECT"
+    return slow_at_forty(case)
+
+
+def hangs_at_a_thousand(case):
+    """Correct, but never returns for dated $1,000.00, a round-number probe
+    of the target search rather than an evaluated point."""
+    if case.has_service_date and case.amount == Decimal("1000.00"):
+        hangs_always(case)
+    return correct(case)
+
+
 def crashes_at_forty(case):
     if _at_forty(case):
         os._exit(7)

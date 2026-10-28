@@ -155,10 +155,11 @@ class VerdictTests(unittest.TestCase):
         crash = Implementation("crash", "", lambda c: None, "tests.isolation_targets:crashes_at_forty")
         broken = Implementation("broken", "", lambda c: None, "tests.isolation_broken:decide")
         cases = [
-            (hang, REFERENCE, 3, "TARGET_DISCREPANCY_CONFIRMED"),   # a timeout is the target failing
-            (crash, REFERENCE, 3, "TARGET_DISCREPANCY_CONFIRMED"),
-            (hang, None, 4, "TARGET_DISCREPANCY_MODEL_ONLY"),       # no reference: unresolved
-            (broken, REFERENCE, 3, "UNSUPPORTED"),                  # not evaluated: an error, not a wrong target
+            # A call that never finished is not evaluated: an error, not a wrong target.
+            (hang, REFERENCE, 3, "UNSUPPORTED"),
+            (crash, REFERENCE, 3, "UNSUPPORTED"),
+            (hang, None, 3, "UNSUPPORTED"),
+            (broken, REFERENCE, 3, "UNSUPPORTED"),
         ]
         for impl, reference, code, expected in cases:
             with self.subTest(target=impl.name, reference=bool(reference)):
@@ -166,7 +167,7 @@ class VerdictTests(unittest.TestCase):
                                 target_timeout=0.5, search_budget=40)
                 self.assertEqual(result.report["verification"]["result"]["exit_code"], code)
                 self.assertIn(expected, result.codes())
-                if expected == "UNSUPPORTED":
+                if expected == "UNSUPPORTED":  # every case above
                     self.assertFalse([c for c in result.codes() if c.startswith("TARGET_DISCREPANCY")])
 
 

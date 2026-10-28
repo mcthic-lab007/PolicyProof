@@ -169,6 +169,16 @@ def lowercase_approve(case):
     return "approve" if case.amount <= LIMIT else "REJECT"
 
 
+def slow_at_threshold(case):
+    """Correct everywhere, but takes 3 s for dated $40.00: longer than the
+    default 2 s per-call timeout, so that call never completes."""
+    if case.has_service_date and case.amount == LIMIT:
+        time.sleep(3.0)
+    if not case.has_service_date:
+        return "REVIEW"
+    return "APPROVE" if case.amount <= LIMIT else "REJECT"
+
+
 def slow_correct(case):
     """Correct, but takes 20 ms per call."""
     time.sleep(0.02)
