@@ -114,3 +114,4 @@ The rows above are from before `b434796`; this sweep is identical before and aft
 2. **Close the narrow-defect gap** (0 of 40 search-enabled runs for the single cent and the 33-cent range). There are two candidates, and both should be measured on this corpus, including the computed-edge hold-out:
    - mine numeric literals from the target's source (deterministic grey-box probing). It should catch the two literal cases but not the computed range;
    - have **Muse Spark propose adversarial probe amounts**, which PolicyProof then judges. Muse could only add test points, never decide an outcome. Replayed responses would keep the benchmark reproducible.
+3. **Open: stop counting timeouts as wrong answers.** A correct target slower than the per-call timeout is falsely accused today (see Threats to validity). First add a correct-but-slow-per-call case to the corpus. Then classify timeouts as not evaluated, or as their own unconfirmed outcome, and measure the change.
