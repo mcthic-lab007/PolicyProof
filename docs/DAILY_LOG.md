@@ -122,3 +122,30 @@ No log was kept that day; this entry is reconstructed from the commit history on
 - Branch not merged.
 
 **Next action:** review `feat/source-literal-probes`. With the key available, record and save live Muse probe proposals and measure them against B.
+
+## 2026-10-28 (fifth session): review of method B; experiment C prepared
+
+**Start state (verified):**
+- `master` = `origin/master` = `ba916b8`.
+- `feat/source-literal-probes` = its remote = `e2f37b4`, clean. CI run 40657124464 belongs to `e2f37b4` and succeeded.
+- `artifacts/` is ignored by Git and intact.
+- `META_MUSE_API_KEY` is not set at process, user or machine scope, so **no live call was made**.
+
+**Review of B:**
+- Parsing is safe on decorated functions, methods, nested functions, `functools.partial`, callable instances, builtins, a malformed file and a deleted file. It never raised, and it never ran the target.
+- Re-ran the benchmark at `e2f37b4`: the same metrics, and 26 of 27 reports identical to the `cbcad53` run (`time-limit-exhausted` is wall-clock dependent).
+- Checked the 40/40 per budget from the sweep records.
+- The BENCHMARK.md tables are well formed. One wording correction was committed as `3b90f85`.
+
+**Experiment C prepared** on `feat/muse-probe-experiment`, stacked on the B branch:
+- `622588c` adds `record` (live) and `evaluate` (offline), the proposed-probe support in `verify()`, and `MuseClient.complete()`.
+- Muse receives code with comments and docstrings removed and the function renamed, because the corpus targets' docstrings state their bugs.
+
+**Validation:** 394 local tests OK. Benchmark B unchanged on this branch (14/15, 0/8, 27/27, reproducible). CLI exit codes unchanged: buggy 3, fixed 0, loophole 3, no reference 4, loophole with budget 0 → 0, no reference with L3 required → 5. The saved-live replay exits 3 and is labelled REPLAY. The demo exits 0.
+
+**Blocker:** a live key.
+
+**Next action:**
+1. With the key set in one shell, run `python -m benchmark.muse_probes record` (63 calls by default; check the cost first).
+2. Then run `evaluate`, and report C and D against A and B.
+3. Review the two branches in order.

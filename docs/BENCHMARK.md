@@ -132,6 +132,31 @@ Before the fix, a call that timed out or whose worker died had no decision. When
 - **What B is and isn't.** B is a grey-box step: it reads the target function's source, and the module constants it names, with `ast`, and never executes it. It only helps when the faulty amount is written as a literal. The computed-range hold-out shows the limit: its edges, `LIMIT * 50 + 0.37`, are not literals. A source amount is a place to look, never evidence. A correct target whose source mentions $777.77 is still L3 (`tests/test_source_literals.py`).
 - **Corpus caveat.** Both literal targets were written by us, knowing that literal mining would be measured. On real engines, how often special cases are spelled as literals is unknown.
 
+### Experiment C with the target's code: prepared, not run
+
+**Status: no live call has been made.** `META_MUSE_API_KEY` was not set at process, user or machine scope on 2026-10-28. The harness is `benchmark/muse_probes.py`, on branch `feat/muse-probe-experiment`, which is stacked on `feat/source-literal-probes`. Its tests use only synthetic responses, labelled as such. They show that the mechanics work, and say nothing about Muse.
+
+**Design, fixed before any live data:**
+- **Input to Muse:** the policy text, plus a code excerpt regenerated from the target's syntax tree (`source_literals.source_excerpt`):
+  - it covers the same function and module constants that method B reads;
+  - the function is renamed to `decide`;
+  - comments and docstrings are removed.
+
+  The removal matters: the corpus targets' docstrings and comments state their own bugs (for example "Approves dated $2,000.37 to $2,000.52"), and so do their function names. Each saved file records the exact prompt and its SHA-256.
+- **Calls:** `record` makes one live `muse-spark-1.3` call per distinct corpus target and trial, with 3 trials by default. That is 21 importable targets, so 63 calls. It never overwrites a saved trial, and it saves the API's `usage` record. Cost is not known in advance.
+- **Methods**, scored on the frozen corpus v2 with its primary configuration (isolated worker, budget 2000, seed 20261104), one run per trial:
+  - **C:** Muse's amounts as extra probes, without source amounts;
+  - **D:** Muse's amounts plus source amounts (B).
+
+  Both are compared with A and B above.
+- **Primary question:** is `narrow-computed-range` found? Its edges are computed (`LIMIT * 50 + 37 cents`, so $2,000.37 to $2,000.52). B cannot see them, and sampling finds them in only 1 of 10 seeds.
+- **Must hold:** 0/8 false accusations.
+- **Also reported:** detection; exact location; new unique probes beyond the derived points, the ladder and B; search calls; tokens from `usage`; and, per target, agreement between trials.
+- **What any result can and cannot show:** a proposal is only a probe. Every finding still comes from the target's and the reference's observed decisions. A Muse success on this corpus would show that it can reason about this code. It would not show reliability on real engines.
+- **Commands:**
+  1. `python -m benchmark.muse_probes record`, with the key set in that shell only;
+  2. `python -m benchmark.muse_probes evaluate --output artifacts/benchmark/muse-probes.json`.
+
 ### Budget and seed sweep (defect group, intervals found / exactly located)
 
 | Case | 0 | 250 | 1000 | 2000 | 8000 |
