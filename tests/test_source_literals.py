@@ -98,6 +98,25 @@ class SourceProbeVerificationTests(unittest.TestCase):
         self.assertEqual(ranges(result), [])
         self.assertEqual(result.level, "L3")
 
+    def test_cli_and_viewer_show_the_probed_amounts(self):
+        import contextlib, io, json, tempfile
+        from src.policyproof import verification
+        from src.policyproof.viewer import render_report
+        from tests.test_target_search import POLICY_PATH, FIXTURE_PATH
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = f"{tmp}/r.json"
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = verification.main([str(POLICY_PATH), "--replay", str(FIXTURE_PATH), "--reference",
+                                          "democo-meal", "--target", "democo-loophole", "--report", report_path])
+            self.assertEqual(code, 3)
+            self.assertIn("Source amounts probed: $40.00, $1000.00, $4999.99", out.getvalue())
+            self.assertIn("parsed, not executed", out.getvalue())
+            with open(report_path, encoding="utf-8") as handle:
+                page = render_report(json.load(handle))
+        self.assertIn("probed first: $40.00, $1000.00, $4999.99", page)
+        self.assertIn("They are probes, not evidence.", page)
+
     def test_unavailable_source_is_reported(self):
         result = run(lambda case: TARGETS["democo-fixed"].decide(case))
         section = result.report["target_search"]["source_amounts"]

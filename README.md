@@ -120,7 +120,8 @@ Verification level: L2
   L2 met: interpreted rules and reference agree at every evaluated point
   L3 not met: target does not agree with the reference at every evaluated point
 Target execution: isolated worker process, 2 s per call, 1512 calls, 0 timeout(s), 0 crash(es), 0 skipped; not a security sandbox.
-Target search: 1500 target calls (1500 probes, 0 bisection) of a budget of 2000, seed 20261104; 0 discrepancy range(s) found. Sampling, not exhaustive.
+Target search: 1500 target calls (1500 probes, 0 bisection) of a budget of 2000, seed 20261104; 0 discrepancy range(s) found, 0 evaluation(s) not judged. Sampling, not exhaustive.
+Source amounts probed: $40.00 (read from fixed_engine.py:9 evaluate_meal_claim(); parsed, not executed).
 ERROR   TARGET_DISCREPANCY_CONFIRMED: The target decides REJECT at amount $40.00 with a service date. The independent reference and the executed proposed rules both decide APPROVE (rule democo-meal-approve-40, citing "Meal claims of $40.00 or less are approved automatically."). [point-40.00-dated]
 INFO    CHECKED: All available perspectives agree at 11 of 12 point(s).
 Not established: semantic correctness; see the report's scope and not_established.
@@ -183,6 +184,7 @@ Exit code **3**. Abridged output:
 Verification level: L2
   L3 not met: target search found 1 range(s) where the target disagrees
 Target search: 1500 target calls (1500 probes, 0 bisection) of a budget of 2000, seed 20261104; 1 discrepancy range(s) found, 0 evaluation(s) not judged. Sampling, not exhaustive.
+Source amounts probed: $40.00, $1000.00, $4999.99 (read from loophole_engine.py:13 evaluate_meal_claim(); parsed, not executed).
 ERROR   TARGET_DISCREPANCY_CONFIRMED: Target search: the target disagrees with the reference at every one of 87 evaluated amounts from $1000.00 to $4999.99 with a service date. The lower edge is verified: it agrees at $999.99 and disagrees at $1000.00. The upper edge is verified: it agrees at $5000.00 and disagrees at $4999.99. At $1000.00 the target decides APPROVE; the independent reference and the executed proposed rules both decide REJECT (rule democo-meal-reject-above-40, citing "Meal claims above $40.00 are rejected."). Amounts between evaluated points were sampled, not all checked. [search-999.99-dated, search-1000.00-dated, search-4999.99-dated, search-5000.00-dated]
 ```
 

@@ -1377,6 +1377,12 @@ def _print_summary(result: VerificationResult) -> None:
               f"budget of {search['budget']}, seed {search['seed']}; "
               f"{search['ranges_found']} discrepancy range(s) found, "
               f"{search['unjudged_evaluations']} evaluation(s) not judged. Sampling, not exhaustive.")
+        source = search.get("source_amounts", {})
+        if source.get("used") and source.get("amounts"):
+            print(f"Source amounts probed: {', '.join('$' + a for a in source['amounts'])} "
+                  f"(read from {source['read_from']}; parsed, not executed).")
+        elif source.get("used"):
+            print(f"Source amounts probed: none ({source.get('unavailable') or 'no amounts in the source'}).")
     for finding in result.findings:
         points = f" [{', '.join(finding.points)}]" if finding.points and finding.code != "CHECKED" else ""
         print(f"{finding.severity.upper():<7} {finding.code}: {finding.summary}{points}")
