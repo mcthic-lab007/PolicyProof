@@ -182,11 +182,13 @@ Exit code **3**. Abridged output:
 ```
 Verification level: L2
   L3 not met: target search found 1 range(s) where the target disagrees
-Target search: 1500 target calls (1500 probes, 0 bisection) of a budget of 2000, seed 20261104; 1 discrepancy range(s) found. Sampling, not exhaustive.
+Target search: 1500 target calls (1500 probes, 0 bisection) of a budget of 2000, seed 20261104; 1 discrepancy range(s) found, 0 evaluation(s) not judged. Sampling, not exhaustive.
 ERROR   TARGET_DISCREPANCY_CONFIRMED: Target search: the target disagrees with the reference at every one of 87 evaluated amounts from $1000.00 to $4999.99 with a service date. The lower edge is verified: it agrees at $999.99 and disagrees at $1000.00. The upper edge is verified: it agrees at $5000.00 and disagrees at $4999.99. At $1000.00 the target decides APPROVE; the independent reference and the executed proposed rules both decide REJECT (rule democo-meal-reject-above-40, citing "Meal claims above $40.00 are rejected."). Amounts between evaluated points were sampled, not all checked. [search-999.99-dated, search-1000.00-dated, search-4999.99-dated, search-5000.00-dated]
 ```
 
 Add `--search-budget 0` to see the problem this solves: without the search, the same engine reaches **L3** with exit code 0.
+
+In this demo, all four edge amounts are round-number probes (step 1 below), so no bisection was needed. The engine's edges fall on round numbers, so this demo does not show random sampling finding a loophole.
 
 **How the search works.** It runs once with a service date and once without. It runs only when a target is given; without a target there is nothing to search.
 1. **Round numbers:** it probes 1, 2, 2.5 and 5 × 10ᵏ dollars and one cent either side, where hand-written thresholds tend to sit.
@@ -344,7 +346,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 - **Target execution:** by default the CLI runs the target in a worker process with a per-call timeout and a total time limit. That protects the verifier from hangs and crashes, but it isn't a security sandbox, so only trusted local code can be selected.
   - The reference still runs in-process.
   - Worker isolation has been tested on Windows only; CI covers Linux once the branch is pushed.
-- **Target search:** it samples within a budget, as described above, and can miss isolated faulty amounts.
+- **Target search:** it samples within a budget, as described above, and can miss isolated faulty amounts. In the [benchmark](docs/BENCHMARK.md), a single wrong cent and a 33-cent range were missed in all 50 runs (budgets 0 to 8000, 10 seeds each). A discrepancy found only at an evaluated point is reported at that point, without its extent. Search calls that cannot be judged (for example, skipped by the time limit) produce an error finding and block L3.
 - **Live API contract:** the request and success-response shape were confirmed by one live call. Refusal, error and incomplete-response shapes follow the OpenAI-compatible format and haven't been seen live. The client makes no retries and the 120-second timeout applies per read, not to the whole request.
 - **Legacy modules:** `verifier.py`, `reporting.py` and `generator.py` are the original prototype and are kept for their existing tests.
 - **Non-goals:**
@@ -353,13 +355,19 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
   - running untrusted code;
   - processing confidential policies.
 
+## Benchmark
+
+`python -m benchmark.run` scores PolicyProof against a 26-case ground-truth corpus of correct, defective and failing targets and evidence scenarios. See [docs/BENCHMARK.md](docs/BENCHMARK.md) for the design, metrics, results and limitations. Current results on corpus v1: no false accusations (0/7), 13 of 15 defects detected, 24 of 26 exit codes as expected.
+
+What was built during the hackathon, and how Muse Spark is used, is documented in [docs/HACKATHON_CONTRIBUTIONS.md](docs/HACKATHON_CONTRIBUTIONS.md).
+
 ## Running the tests
 
 ```powershell
 .\.venv\Scripts\python.exe -B -m unittest discover -s tests -t . -v
 ```
 
-The suite has 351 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
+The suite has 360 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
 
 GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3.12 for every push and pull request.
 
