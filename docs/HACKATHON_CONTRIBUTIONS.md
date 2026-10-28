@@ -51,6 +51,8 @@ What was built for the Meta Global AI Developer Hackathon (2026-10-26 to 2026-11
 | 11 | Adversarial benchmark, corpus v1 | `8d3b337` (10-28) | 26-case ground-truth corpus, scorer, budget/seed sweep | `tests/test_benchmark.py`; [BENCHMARK.md](BENCHMARK.md) |
 | 12 | Fix: unjudged search calls counted as agreement | `1021823` (10-28) | A run whose search was cut short no longer reaches L3 or exits 0 | Regression tests in `test_target_search.py` and `test_target_worker.py` |
 | 13 | Fix: search limitation text matches the execution mode | `fb0f96f`, `f326b83` (10-28) | The report no longer says "no timeout" for isolated runs | `test_target_worker.py` |
+| 14 | Provenance audit of `496bc75` | `045a74a` (10-28) | Records outside Git checked; findings in this document | — |
+| 15 | Bounded edges for discrepancies seen only at evaluated points | `b434796` (10-28) | The edges of an off-by-one-cent bug are located and both sides are shown as evaluated | Six tests in `test_target_search.py`; benchmark exact location 12/15 → 13/15 |
 
 Merge commits (`9dcfe54`, `5cc0f07`, `129433b`, `b2f75b9`, `7918fcb`, `7921aa3`, `e48006d`, `451e83b`) integrate the feature branches above and add no code of their own.
 
