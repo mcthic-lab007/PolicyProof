@@ -6,14 +6,38 @@ What was built for the Meta Global AI Developer Hackathon (2026-10-26 to 2026-11
 
 - The repository has **no commit before 2026-10-27 19:49 +0530**. All commits are dated 2026-10-27 or later, inside the event window.
 - Git dates are set by the committer's machine and are **not proof** of when code was written. This document does not infer authorship dates beyond what the commits show.
-- **Open question for the author to confirm.** The first commit, `496bc75` ("Establish PolicyProof validation baseline", 16 files, 1,702 lines), arrived as one block. It contains the strict schema validator (`schema.py`, 710 lines) and its tests, plus the small prototype (`models.py`, `reference.py`, `generator.py`, `verifier.py`, `reporting.py`, `examples/buggy_engine.py`). If any of that code was written before 2026-10-26, it must be listed here as a pre-existing foundation. **Until confirmed, treat `496bc75` as "provenance unconfirmed".**
-- **AI assistance.** Commits from `9ad4b4a` onward carry a `Co-Authored-By: Claude Opus 5.5` trailer. They were written with Claude Code as a development assistant.
+- **AI assistance.** Commits from `9ad4b4a` onward carry a `Co-Authored-By: Claude Opus 5.5` trailer. They were written with Claude Code as a development assistant. Part of `496bc75` was also written with Claude Code, although that commit has no trailer (see below).
+
+## Provenance of the first commit, `496bc75`
+
+`496bc75` ("Establish PolicyProof validation baseline", 2026-10-27 19:49 +0530, 16 files, 1,702 lines) arrived as one block. It was investigated on 2026-10-28 using records kept outside Git, not the commit date alone. All times are IST (+0530) on 2026-10-27, one day after the event started.
+
+**Evidence:**
+
+| Source | What it shows |
+|---|---|
+| Claude Code transcript of the first session in this project (local, not committed) | Starts at 18:56:59. The user's first prompt lists `models.py`, `reference.py`, `verifier.py`, `generator.py`, `reporting.py`, `examples/buggy_engine.py` and `tests/test_verifier.py` as **existing files** that "previously passed three unit tests". |
+| The same transcript | Claude Code **created** `.gitignore` and the `__init__.py` files (19:00), `examples/democo_meal_policy.txt` and `examples/democo_meal_rules.json` (19:05), `src/policyproof/schema.py` (19:06) and `tests/test_schema.py` (19:06). It edited them after a review until 19:23. The user made the commit at 19:49. |
+| Claude Code prompt history (local) | No prompt in this project before 18:56:59. No other local Claude Code transcript mentions PolicyProof. |
+| File creation times in the working tree | `.venv` 17:04, then `models.py` 17:07, `reference.py` 17:10, `buggy_engine.py` 17:11, `verifier.py` 17:12, `reporting.py` 17:13, `test_verifier.py` 17:16 (last modified 17:26) and `generator.py` 17:18. |
+| The author's planning documents (local, not committed) | A project write-up saved at 16:25 lists "build a tiny synthetic DemoCo engine" as a **next step**, after a manual Muse Spark smoke test. A workflow write-up saved at 17:38 describes the prototype with three passing tests. |
+| The author's other local projects | A search for PolicyProof identifiers found no shared code (only matches inside third-party packages). |
+
+**What this establishes:**
+- The schema validator, its tests, the DemoCo policy text and rules file, and `.gitignore` (1,485 of the 1,702 lines) were written with Claude Code on 2026-10-27 between 19:00 and 19:23. That is inside the event.
+- Every independent record dates the prototype (seven files, 217 lines) to 2026-10-27 between about 17:04 and 17:26. All of them are consistent with it being written during the event. **No record suggests anything predates 2026-10-26.**
+
+**What remains uncertain:**
+- File creation times are file-system metadata. Copying or restoring a file can change them, so they corroborate but do not prove.
+- The planning documents' save times are the only independent record of when they were written. Their embedded metadata is a library default and carries no information.
+- **Who or what wrote the prototype is not recorded.** It was not written in Claude Code. The 17:38 write-up describes it as "code created in this session", which suggests an assistant chat session. Before submission, the author should name the tool here.
 
 ## Contribution inventory
 
 | # | Component | Commits (date, +0530) | What it does | Tests / demonstration |
 |---|---|---|---|---|
-| 0 | Prototype and strict proposal schema | `496bc75` (10-27 19:49), **provenance unconfirmed** | Closed JSON contract, exact decimals, verbatim evidence quotes, threshold grounding, plus a minimal reference/buggy-engine comparison | `tests/test_schema.py`, `tests/test_verifier.py` |
+| 0a | Differential-testing prototype | `496bc75` (10-27 19:49). Written about 17:07–17:26 on 10-27 by a tool not recorded (see above) | Hand-written reference, buggy engine at $40.00, seven fixed cases, JSON report | `tests/test_verifier.py` (3 tests) |
+| 0b | Strict proposal schema and validator; DemoCo policy and rules | `496bc75` (10-27 19:49). Written with Claude Code 19:00–19:23 on 10-27 | Closed JSON contract, exact decimals, verbatim evidence quotes, threshold grounding | `tests/test_schema.py` |
 | 1 | Muse Spark client | `9ad4b4a` (10-27 20:51) | Responses API client for `muse-spark-1.3`: prompt construction, strict response parsing, refusals and errors, key redaction, save/replay, provenance labels | `tests/test_muse_client.py`; one live call saved locally (see below) |
 | 2 | Deterministic rule interpreter | `138c455` (10-27 21:03) | First-match priority semantics, NO_MATCH instead of default approval, full traces, boundary-point derivation | `tests/test_rule_engine.py` |
 | 3 | Verification pipeline | `8e94bdd` (10-27 21:16) | Four perspectives per point, the finding taxonomy, levels L0–L3, JSON evidence report, CLI | `tests/test_verification.py` |

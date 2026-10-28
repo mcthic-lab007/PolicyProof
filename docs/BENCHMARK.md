@@ -86,7 +86,7 @@ This sweep is identical before and after the fix. No spurious claims were made a
 
 1. **No false accusations and no spurious claims** (0/7 cases, 0/598 claims). When PolicyProof says "confirmed", the ground truth agreed every time in this corpus. The model-only, contradicting-expectation and conflicting-reference scenarios were correctly *not* confirmed.
 2. **Discrepancies found only at evaluated points are never bounded.** `off-by-one-cent` is found in 50/50 runs but exactly located in 0/50: the verifier reports $40.01 and never checks whether $40.02 agrees. `bankers-rounding` is exactly located in only 4/10 seeds at the default budget, because bisection runs only for disagreement the search itself found.
-3. **Narrow defects far from any threshold are missed at every budget tested.** The single cent and the 33-cent range were found in 0/50 runs each, even at budget 8000. The computed 16-cent range was found in 1/10 seeds at budgets of 1000 or more. This is the documented limitation of sampling, now quantified.
+3. **Narrow defects far from any threshold are missed at every budget tested.** The single cent and the 33-cent range were found in 0 of 40 runs each with search enabled (budgets 250–8000, 10 seeds each); budget 0 disables search by contract. The computed 16-cent range was found in 1/10 seeds at budgets of 1000 or more. This is the documented limitation of sampling, now quantified.
 4. **The loophole demo is found by the round-number ladder, not by random sampling.** Its edges ($999.99/$1,000.00 and $4,999.99/$5,000.00) are ladder probes; the run uses 0 bisection calls. The demo narration must say this rather than imply that the random search found it.
 
 ## Threats to validity
@@ -95,11 +95,12 @@ This sweep is identical before and after the fix. No spurious claims were made a
 - **Ground truth:** it is declared, then checked at edges and samples, not exhaustively over about 200 million inputs.
 - **Scorer fix after the first run:** the first baseline scored points in `conflicting-reference` against that run's deliberately conflicting reference instead of the ground truth, which gave 744/745. That is a harness bug. It was fixed and the baseline was re-run on the unmodified verifier before any comparison. No ground truth or expected verdict was changed.
 - **Timing dependence:** `time-limit-exhausted` and `hangs-at-40` depend on wall-clock time. The not-run count was 1421 in these runs and 1422 in one earlier run, so their reports are reproducible only per machine and load. Every other case is deterministic.
+- **Timeouts count as wrong answers:** a call that exceeds the per-call timeout (default 2 s) gets no decision, so it is a confirmed discrepancy when the reference decides. The report states the failure kind, but a correct target that is slower than the timeout would still be reported as wrong. `hangs-at-40` relies on this. The corpus has no correct-but-slow-per-call case, so the false-accusation rate does not cover it.
 - **Platform:** all runs were on Windows. CI covers the unit tests on Linux, but it does not run the benchmark.
 
 ## Ranked next improvements (from this evidence)
 
 1. **Bound discrepancies seen at evaluated points.** Bisect outward from evaluated-only disagreeing runs as well. This targets exact location (sweep: 74/120 at the default budget) and costs about 2 × log₂(gap) calls per edge.
-2. **Close the narrow-defect gap** (0/50 for the single cent and the 33-cent range). There are two candidates, and both should be measured on this corpus, including the computed-edge hold-out:
+2. **Close the narrow-defect gap** (0 of 40 search-enabled runs for the single cent and the 33-cent range). There are two candidates, and both should be measured on this corpus, including the computed-edge hold-out:
    - mine numeric literals from the target's source (deterministic grey-box probing). It should catch the two literal cases but not the computed range;
    - have **Muse Spark propose adversarial probe amounts**, which PolicyProof then judges. Muse could only add test points, never decide an outcome. Replayed responses would keep the benchmark reproducible.

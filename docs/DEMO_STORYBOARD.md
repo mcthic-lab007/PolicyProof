@@ -19,7 +19,7 @@ $py = ".\.venv\Scripts\python.exe"; $pol = "examples/democo_meal_policy.txt"
 | 1:50–2:05 | The fixed engine (`--target democo-fixed`) | "The fix passes at level L3: rules, an independent human reference and the target agree at every evaluated point, plus 1,500 sampled amounts. That is sampling, not proof." | Exit 0, `Verification level: L3` | Pre-recorded take |
 | 2:05–2:30 | The evidence viewer in a browser (`python -m src.policyproof.demo --open`) | "Every conclusion is inspectable: which rule, which quote, which inputs, who said what, and what we can't establish." | The HTML page: headline, edges, the "not established" list | Show the static `artifacts/demo/evidence-*.html` already rendered |
 | 2:30–2:50 | `docs/BENCHMARK.md` results table | "We benchmarked the verifier itself against 26 seeded cases: zero false accusations, 13 of 15 defects found. It misses one-cent and 33-cent defects, and we say so. The benchmark also caught a bug in our own verifier, which we fixed." | 0/7 false accusations; 13/15 detection; the misses; verdicts 23/26 → 24/26 | Same, as a static slide made from the file |
-| 2:50–3:00 | `docs/HACKATHON_CONTRIBUTIONS.md` | "Muse proposes; PolicyProof verifies. Everything here was built during the hackathon; the contribution log lists each piece." | The inventory table | None |
+| 2:50–3:00 | `docs/HACKATHON_CONTRIBUTIONS.md` | "Muse proposes; PolicyProof verifies. All of this was built during the hackathon, with AI coding assistants, and the contribution log lists each piece and its evidence." | The inventory table and the provenance section | None |
 
 ## Before recording
 
@@ -27,5 +27,5 @@ $py = ".\.venv\Scripts\python.exe"; $pol = "examples/democo_meal_policy.txt"
 - [ ] Live output may differ from the saved response, because the model is not deterministic. Re-check that the $40.00 discrepancy still appears, and narrate what actually happens.
 - [ ] **Do not use the files in `artifacts/video/live-*.txt` as live footage.** They are **replays** of the saved response; their own first line says so.
 - [ ] Re-verify the Meta API requirements and the hackathon rules (permitted models, attribution) against the official sources on the recording day.
-- [ ] Confirm the provenance question in HACKATHON_CONTRIBUTIONS.md before saying "everything here was built during the hackathon". Change the line if it isn't true.
+- [ ] Provenance: records outside Git date all of `496bc75` to 2026-10-27 (see HACKATHON_CONTRIBUTIONS.md). Before saying the closing line, the author confirms it and names the tool that wrote the prototype.
 - [ ] Time the full run-through and keep it at 3:00 or under.
