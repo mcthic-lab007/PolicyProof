@@ -193,7 +193,7 @@ In this demo, all four edge amounts are round-number probes (step 1 below), so n
 **How the search works.** It runs once with a service date and once without. It runs only when a target is given; without a target there is nothing to search.
 1. **Round numbers:** it probes 1, 2, 2.5 and 5 × 10ᵏ dollars and one cent either side, where hand-written thresholds tend to sit.
 2. **Seeded samples:** it probes whole-cent amounts spread across each power-of-ten band between neighbouring evaluated amounts. It uses only integer arithmetic, so the same seed gives the same amounts on every platform.
-3. **Edges:** for every run of disagreeing amounts, it bisects against the nearest agreeing amount until the two are one cent apart. A reported edge is "verified" only when both sides were actually evaluated; otherwise it is given as an interval.
+3. **Edges:** for every run of disagreeing amounts, it bisects against the nearest agreeing amount until the two are one cent apart. A reported edge is "verified" only when both sides were actually evaluated; otherwise it is given as an interval. This includes a discrepancy seen only at a boundary point. For example, a target that approves up to $40.01 is reported as a range from $40.01 to $40.01, with $40.00 and $40.02 shown as agreeing. Ranges the search found are bisected first, so this extra step never takes budget from them.
 
 **Settings and cost:**
 - `--search-budget N` caps target calls; the default is 2000, 0 turns the search off, and the maximum is 100000. A quarter of the budget is kept for bisection.
@@ -251,7 +251,7 @@ The main page shows, without any raw JSON:
 - what the result doesn't establish;
 - the run's result (`OK`, `FAILED`, `INCONCLUSIVE`, …) with its exit code;
 - how the target was run, and what the target search covered;
-- for ranges found by the search, the exact edges and whether each was verified;
+- for discrepancy ranges, the exact edges and whether each was verified;
 - for disputed findings, why they couldn't be confirmed;
 - links to the other three runs.
 
@@ -367,7 +367,7 @@ What was built during the hackathon, and how Muse Spark is used, is documented i
 .\.venv\Scripts\python.exe -B -m unittest discover -s tests -t . -v
 ```
 
-The suite has 360 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
+The suite has 369 tests, and none of them call the network. Two of them replay the saved live response in `artifacts/muse_live_001.json`, which is local and ignored by Git. They run only where that file exists. On a fresh clone and in CI they are reported as skipped (`OK (skipped=2)`); they never pass silently.
 
 GitHub Actions (`.github/workflows/tests.yml`) runs the same command on Python 3.12 for every push and pull request.
 

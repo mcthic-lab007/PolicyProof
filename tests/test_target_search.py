@@ -14,6 +14,7 @@ from src.policyproof.reference import evaluate_meal_claim as reference_engine
 from src.policyproof.target_search import (
     DEFAULT_BUDGET,
     DEFAULT_SEED,
+    Edge,
     MAX_BUDGET,
     Judgement,
     search,
@@ -319,6 +320,105 @@ class SearchAlgorithmTests(unittest.TestCase):
         calls = []
         outcome = search(lambda a, d: calls.append(a) or Judgement(True), {}, low=LOW, high=HIGH, budget=0)
         self.assertEqual((calls, outcome.calls, outcome.ranges), ([], 0, ()))
+
+    def evaluated_only(self, first, last, budget=200):
+        """Disagreement in [first, last] (dated), where the only evaluated
+        disagreeing amount is ``first`` and its lower neighbour agrees."""
+        def oracle(amount, dated):
+            return not (dated and D(first) <= amount <= D(last))
+        known = self.known(oracle)
+        for amount in (D(first) - D("0.01"), D(first)):
+            known[(amount, True)] = Judgement(oracle(amount, True))
+        return oracle, search(lambda amount, dated: Judgement(oracle(amount, dated)),
+                              known, low=LOW, high=HIGH, budget=budget)
+
+    def test_disagreement_at_an_evaluated_point_only_is_bounded(self):
+        oracle, outcome = self.evaluated_only("40.01", "40.01")
+        self.assertEqual(len(outcome.ranges), 1)
+        found = outcome.ranges[0]
+        self.assertEqual((found.lower, found.upper), (
+            Edge(True, D("40.01"), D("40.00")), Edge(True, D("40.01"), D("40.02"))))
+        self.assertEqual((found.disagreeing, found.found_by_search), ((D("40.01"),), 0))
+        self.assertGreater(outcome.bisection_calls, 0)
+        self.assertTrue(oracle(D("40.02"), True))
+
+    def test_evaluated_only_run_is_extended_by_bisection(self):
+        _, outcome = self.evaluated_only("40.01", "40.50")
+        self.assertEqual([(r.lower, r.upper) for r in outcome.ranges], [
+            (Edge(True, D("40.01"), D("40.00")), Edge(True, D("40.50"), D("40.51")))])
+        self.assertEqual(outcome.ranges[0].found_by_search, sum(
+            1 for a in outcome.ranges[0].disagreeing if a != D("40.01")))
+
+    def test_probed_neighbour_bounds_an_evaluated_only_run(self):
+        """The ladder probes $50.00, next to the only (evaluated) disagreeing
+        cent $49.99: no bisection is needed, but the range is still reported,
+        so the agreeing neighbour appears in the evidence."""
+        _, outcome = self.evaluated_only("49.99", "49.99")
+        self.assertEqual([(r.lower, r.upper) for r in outcome.ranges], [
+            (Edge(True, D("49.99"), D("49.98")), Edge(True, D("49.99"), D("50.00")))])
+        self.assertEqual(outcome.bisection_calls, 0)
+
+    def test_adjacent_agreeing_neighbours_add_no_range(self):
+        def oracle(amount, dated):
+            return not (dated and amount == D("40.00"))
+        known = self.known(oracle)
+        for amount in (D("39.99"), D("40.01")):
+            known[(amount, True)] = Judgement(True)
+        outcome = search(lambda amount, dated: Judgement(oracle(amount, dated)),
+                         known, low=LOW, high=HIGH, budget=200)
+        self.assertEqual((outcome.ranges, outcome.bisection_calls), ((), 0))
+
+    def test_budget_zero_leaves_evaluated_only_runs_unbounded(self):
+        _, outcome = self.evaluated_only("40.01", "40.50", budget=0)
+        self.assertEqual((outcome.calls, outcome.ranges), (0, ()))
+
+    def test_search_found_ranges_are_bisected_first(self):
+        """Bounding evaluated-only runs must not take bisection budget from
+        ranges the search found: those get the same calls as before."""
+        def oracle(amount, dated):
+            return not (dated and (D("40.01") <= amount <= D("40.50")
+                                   or D("1000.00") <= amount <= D("4999.99")))
+        known = self.known(oracle)
+        known[(D("40.01"), True)] = Judgement(False)
+        order = []
+
+        def judge(amount, dated):
+            order.append(amount)
+            return Judgement(oracle(amount, dated))
+        outcome = search(judge, known, low=LOW, high=HIGH, budget=200)
+        spans = [(r.lower.inside, r.upper.inside) for r in outcome.ranges]
+        self.assertIn((D("1000.00"), D("4999.99")), spans)
+        self.assertIn((D("40.01"), D("40.50")), spans)
+        bisected = order[outcome.probe_calls:]
+        first_low = next(i for i, a in enumerate(bisected) if a < D("41"))
+        self.assertTrue(all(a >= D("41") for a in bisected[:first_low]))
+        self.assertGreater(first_low, 0)
+
+
+class PointDiscrepancyBoundsTests(unittest.TestCase):
+    """Discrepancies seen only at evaluated points get bounded edges too."""
+
+    def test_off_by_one_cent_is_bounded_on_both_sides(self):
+        result = run(wrong_in(("40.01", "40.01")))
+        found = ranges(result)
+        self.assertEqual([span(f) for f in found], [(True, "40.01", "40.01", True, True)])
+        self.assertEqual(found[0].code, "TARGET_DISCREPANCY_CONFIRMED")
+        self.assertEqual((found[0].details["agrees_below"], found[0].details["agrees_above"]),
+                         ("40.00", "40.02"))
+        self.assertEqual(found[0].details["found_by_search"], 0)
+        points = [f for f in result.findings
+                  if f.code == "TARGET_DISCREPANCY_CONFIRMED" and f.details.get("kind") != "range"]
+        self.assertEqual(len(points), 1)
+        self.assertEqual((result.level, result.report["verification"]["result"]["exit_code"]), ("L2", 3))
+
+    def test_rounding_range_starting_at_a_threshold_is_bounded(self):
+        result = run(wrong_in(("40.01", "40.50")))
+        self.assertEqual([span(f) for f in ranges(result)], [(True, "40.01", "40.50", True, True)])
+
+    def test_without_search_point_discrepancies_stay_points(self):
+        result = run(wrong_in(("40.01", "40.50")), search_budget=0)
+        self.assertEqual(ranges(result), [])
+        self.assertEqual(result.report["verification"]["result"]["exit_code"], 3)
 
 
 if __name__ == "__main__":

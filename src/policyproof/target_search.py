@@ -13,11 +13,14 @@ Algorithm, run separately for each value of has_service_date:
      the bands are sampled round-robin with ``random.Random(seed).randrange``
      (integer arithmetic only, so the same seed gives the same amounts on
      every platform).
-  3. Group neighbouring disagreeing amounts into ranges. A range is
-     reported only if the search itself contributed to it. For each edge,
+  3. Group neighbouring disagreeing amounts into ranges. For each edge,
      bisect in whole cents between the nearest agreeing amount and the range
      until the two are one cent apart, so both sides of every reported edge
-     have been evaluated.
+     have been evaluated. Ranges the search contributed to are bounded
+     first. A run of evaluated points only is bounded afterwards and
+     reported as a range only if the search evaluated at least one of its
+     amounts or edge neighbours; otherwise everything about it is already
+     among the evaluated points, which report it on their own.
 
 Budget: at most ``budget`` judge calls in total, never more. A quarter is
 reserved for bisection; the rest is shared equally by the two date values.
@@ -135,28 +138,51 @@ def search(
         for amount in _candidates(evaluated, low, high, rng, share):
             call(amount, dated, "probe")
 
-    ranges = []
-    for dated in (False, True):
+    def runs(dated: bool):
+        """Disagreeing runs as (run, nearest agreeing below, nearest above)."""
         judged = sorted(
             (amount, j.agrees) for (amount, d), j in observed.items()
             if d == dated and j.agrees is not None
         )
         for run_start, run_end in _disagreeing_runs(judged):
-            run = [amount for amount, _ in judged[run_start:run_end + 1]]
-            if not any((amount, dated) in searched for amount in run):
-                continue  # only evaluated points: already reported individually
-            below = judged[run_start - 1][0] if run_start > 0 else None
-            above = judged[run_end + 1][0] if run_end + 1 < len(judged) else None
-            lower = _lower_edge(call, dated, below, run[0], low)
-            upper = _upper_edge(call, dated, run[-1], above, high)
-            disagreeing = tuple(sorted(
-                amount for (amount, d), j in observed.items()
-                if d == dated and j.agrees is False and lower.inside <= amount <= upper.inside
-            ))
-            ranges.append(DiscrepancyRange(
-                dated, lower, upper, disagreeing,
-                sum((amount, dated) in searched for amount in disagreeing),
-            ))
+            yield (
+                [amount for amount, _ in judged[run_start:run_end + 1]],
+                judged[run_start - 1][0] if run_start > 0 else None,
+                judged[run_end + 1][0] if run_end + 1 < len(judged) else None,
+            )
+
+    def bound(dated: bool, run, below, above) -> DiscrepancyRange:
+        lower = _lower_edge(call, dated, below, run[0], low)
+        upper = _upper_edge(call, dated, run[-1], above, high)
+        disagreeing = tuple(sorted(
+            amount for (amount, d), j in observed.items()
+            if d == dated and j.agrees is False and lower.inside <= amount <= upper.inside
+        ))
+        return DiscrepancyRange(
+            dated, lower, upper, disagreeing,
+            sum((amount, dated) in searched for amount in disagreeing),
+        )
+
+    # Ranges the search found are bounded first, so they keep the bisection
+    # budget they had before evaluated-only runs were bounded too.
+    ranges = []
+    for dated in (False, True):
+        for run, below, above in list(runs(dated)):
+            if any((amount, dated) in searched for amount in run):
+                ranges.append(bound(dated, run, below, above))
+    # Runs of evaluated points only: bound their edges as well, and report
+    # them as ranges only if the search evaluated one of their amounts or
+    # edge neighbours (by probing or by this bisection).
+    for dated in (False, True):
+        for run, below, above in list(runs(dated)):
+            if any(r.has_service_date == dated and r.lower.inside <= run[0] <= r.upper.inside
+                   for r in ranges):
+                continue
+            found = bound(dated, run, below, above)
+            evidence = (found.lower.outside, found.upper.outside, *found.disagreeing)
+            if any((amount, dated) in searched for amount in evidence if amount is not None):
+                ranges.append(found)
+    ranges.sort(key=lambda r: (r.has_service_date, r.lower.inside))
 
     unjudged = tuple(sorted(key for key in searched if observed[key].agrees is None))
     return SearchOutcome(
