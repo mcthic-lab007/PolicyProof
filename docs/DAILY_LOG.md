@@ -72,3 +72,30 @@ No log was kept that day; this entry is reconstructed from the commit history on
 1. Review and merge `feat/adversarial-benchmark`, then `feat/bound-point-discrepancies`.
 2. With `META_MUSE_API_KEY` set, make and save a live call that asks Muse Spark for adversarial probe amounts (C).
 3. Measure C against a deterministic literal-mining control (B) on corpus v1.
+
+## 2026-10-28 (third session): merges, then timeouts are not evaluations
+
+**Merges (authorized by the author; verified):**
+- `fd19ffe` (docs only) was added to `feat/bound-point-discrepancies` before merging. It documented the timeout false-accusation limitation and corrected the README. CI run 40648468216 succeeded.
+- `2dee2a6` merged `feat/adversarial-benchmark` into `master`. 360 local tests OK. CI run 40648694182: 358 passed, 2 skipped.
+- `9a3adb1` merged `feat/bound-point-discrepancies`. 369 local tests OK. CI run 40648794074: 367 passed, 2 skipped.
+- After each merge, master's tree was identical to the merged branch's. All documented CLI exit codes and the demo were checked.
+- `master` = `origin/master` = `9a3adb1`. Both feature branches are kept.
+
+**Start state for this session (verified):** `master` = `origin/master` = `9a3adb1`, clean tree. Branch `feat/timeout-not-violation` was created from `origin/master`.
+
+**Done:**
+- `f21e7b0`: corpus v2 adds `slow-correct-at-threshold`, and the scorer stops counting unfinished calls as judgements. Committed before measuring.
+- Baseline on the unmodified verifier (`f21e7b0`): **1/8 false accusations**. The correct but slow target was confirmed wrong at $40.00 because its call timed out.
+- `3def8c0`: timeouts and worker crashes are now not evaluated: `UNSUPPORTED`, exit 3, no L3. The viewer lists unfinished calls instead of saying the target agreed.
+- After the fix: false accusations 0/8, spurious claims 0/605, verdicts 25/27, all exit codes unchanged. Detection fell from 13/15 to 12/15 by design, because `hangs-at-40` is now unfinished rather than confirmed. Public change: a hang with no reference exits 3 instead of 4.
+- Three existing hang/crash tests and `test_semantics` were updated to the new semantics. Each is listed in BENCHMARK.md.
+
+**Validation:** 373 local tests OK. CLI exit codes unchanged: buggy 3, fixed 0, loophole 3, no reference 4, loophole with budget 0 → 0, no reference with L3 required → 5. The saved-live replay exits 3 and is labelled REPLAY. The demo exits 0. CI run 40651237249 on `e1768c7`: 371 passed, 2 skipped.
+
+**Open:**
+- A target that is slow everywhere is reported as unfinished, never as correct, until `--target-timeout` is raised. The 2 s default isn't tuned to a real engine.
+- The prototype's authoring tool still has to be named.
+- The participant guide's exact wording is still needed.
+
+**Next action:** review `feat/timeout-not-violation` (not merged). Then, with `META_MUSE_API_KEY` set, make a saved live call for Muse-proposed probe amounts (C) and measure it against literal mining (B).
