@@ -23,7 +23,8 @@ Findings (exact conditions):
   UNSUPPORTED          the interpreter cannot run the document, derivation
                        exceeds its limit, a policy amount cannot be used as
                        a threshold, the reference fails at a point, the
-                       target was not evaluated at a point, or target-search
+                       target was not evaluated at a point (skipped, not
+                       started, timed out or its worker died), or target-search
                        evaluations could not be judged (an error: L3 is not
                        claimed for a search that was partly not judged).
   COVERAGE_GAP         no rule decides a point (status NO_MATCH). Other
@@ -131,8 +132,12 @@ MAX_POLICY_THRESHOLDS = 100
 # Isolated target execution (CLI default): per-call timeout and total limit, seconds.
 DEFAULT_TARGET_TIMEOUT = 2.0
 DEFAULT_TIME_LIMIT = 120.0
-# Target outcomes that mean "not evaluated", as opposed to "evaluated and wrong".
-NOT_EVALUATED = frozenset({"not_run", "worker_startup"})
+# Target outcomes that mean "not evaluated", as opposed to "evaluated and wrong":
+# the call never finished, so it says nothing about the target's decision. A
+# timeout cannot tell a hang from a correct but slow target, and a dead worker
+# cannot tell a target bug from the environment. A call that finished by
+# raising or returning a non-decision is the target's answer and stays judged.
+NOT_EVALUATED = frozenset({"not_run", "worker_startup", "timeout", "worker_crash"})
 LEVELS = ("L0", "L1", "L2", "L3")
 # Findings that leave the verdict on the target unresolved without being
 # errors: two perspectives conflict, or only the model contradicts the target.
@@ -941,12 +946,17 @@ def _findings(document, results, reference, target) -> list[Finding]:
 
     not_evaluated = [r for r in results if r.target is not None and r.target.failure in NOT_EVALUATED]
     if not_evaluated:
+        failures: dict[str, int] = {}
+        for r in not_evaluated:
+            failures[r.target.failure] = failures.get(r.target.failure, 0) + 1
         findings.append(Finding(
             "UNSUPPORTED", "error",
-            f"The target was not evaluated at {len(not_evaluated)} point(s): "
-            f"{not_evaluated[0].target.error}. Nothing is concluded about the target there.",
+            f"The target was not evaluated at {len(not_evaluated)} point(s) ("
+            + ", ".join(f"{n} {kind}" for kind, n in sorted(failures.items()))
+            + f"): {not_evaluated[0].target.error}. A call that did not finish is not evidence "
+            "of a wrong decision, so nothing is concluded about the target there.",
             points=tuple(r.id for r in not_evaluated),
-            details={"errors": {r.id: r.target.error for r in not_evaluated}},
+            details={"errors": {r.id: r.target.error for r in not_evaluated}, "failures": failures},
         ))
 
     for r in results:

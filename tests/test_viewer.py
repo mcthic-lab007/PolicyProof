@@ -289,6 +289,8 @@ class IntegratedReportRenderingTests(unittest.TestCase):
         target = page.split('id="headline"')[1].split("</section>")[0]
         self.assertIn('<span class="failure">timeout</span>', target)
         self.assertIn("timed out after 0.5 s; the worker process was killed", target)
+        self.assertIn("not evidence of a wrong decision", target)
+        self.assertNotIn("agreed wherever", target)
         self.assertIn("ran in a separate worker process with a 0.5 s timeout per call", page)
         self.assertIn("not a security sandbox", page)
 

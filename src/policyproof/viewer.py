@@ -266,20 +266,42 @@ def _search_summary(search: Any) -> str:
 
 def _headline(findings, points, rules, report) -> str:
     targeted = [f for f in findings if f.get("code") in TARGET_CODES]
+    unfinished = _unfinished(findings)
     if not targeted:
         if _get(report, "target") is None:
             note = "No target was supplied, so no implementation was checked."
+        elif unfinished:
+            note = "No target discrepancy was established, but the check is incomplete (below)."
         else:
             note = "No target discrepancy: the target agreed wherever it was compared."
         return (
             "<section aria-labelledby=\"headline\">\n<h2 id=\"headline\">Target findings</h2>\n"
-            f"<p class=\"callout\">{_e(note)}</p>\n</section>"
+            f"<p class=\"callout\">{_e(note)}</p>\n{unfinished}</section>"
         )
     cards = "\n".join(_target_card(f, points, rules, report) for f in targeted)
     return (
         "<section aria-labelledby=\"headline\">\n<h2 id=\"headline\">Target findings</h2>\n"
-        f"{cards}\n</section>"
+        f"{cards}\n{unfinished}</section>"
     )
+
+
+def _unfinished(findings) -> str:
+    """Points where the target call never finished, with their cause: never
+    presented as agreement, nor as a wrong decision."""
+    for finding in findings:
+        details = finding.get("details") or {}
+        if finding.get("code") != "UNSUPPORTED" or "failures" not in details:
+            continue
+        errors = details.get("errors") or {}
+        kinds = ", ".join(f"<span class=\"failure\">{_e(kind)}</span> × {_e(n)}"
+                          for kind, n in sorted((details.get("failures") or {}).items()))
+        items = "".join(f"<li>{_e(point_id)}: {_e(error)}</li>" for point_id, error in errors.items())
+        return (
+            f"<p>The target did not finish at {len(errors)} point(s): {kinds}. That is not "
+            "evidence of a wrong decision, and nothing is concluded about the target there.</p>\n"
+            f"<ul>{items}</ul>\n"
+        )
+    return ""
 
 
 def _target_card(finding, points, rules, report) -> str:
