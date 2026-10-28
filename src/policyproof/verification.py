@@ -351,7 +351,7 @@ def verify(
         excluded_points=list(derivation.excluded),
         points=[_point_record(result) for result in (*results, *search_points)],
         findings=[_finding_record(finding) for finding in findings],
-        target_search=_search_section(outcome, target, search_budget, reference),
+        target_search=_search_section(outcome, target, search_budget, reference, worker),
         target_execution=_execution_section(target, worker),
     )
     report["verification"]["result"] = verdict(findings, level, required_level)
@@ -800,7 +800,8 @@ def _execution_section(target, worker: TargetWorker | None) -> dict[str, Any]:
     }
 
 
-def _search_section(outcome: SearchOutcome | None, target, budget, reference) -> dict[str, Any]:
+def _search_section(outcome: SearchOutcome | None, target, budget, reference,
+                    worker: TargetWorker | None = None) -> dict[str, Any]:
     if outcome is None:
         reason = "no target supplied" if target is None else "search budget is 0"
         return {"performed": False, "reason": reason}
@@ -829,7 +830,10 @@ def _search_section(outcome: SearchOutcome | None, target, budget, reference) ->
             "may contain agreeing amounts that were never sampled.",
             "Edges marked verified were evaluated on both sides; any other edge is given as an "
             "interval.",
-            "Target calls run in this process: there is no timeout and no sandbox.",
+            "Target calls run in this process: there is no timeout and no sandbox."
+            if worker is None else
+            "Target calls run in a worker process with a per-call timeout; that is process "
+            "isolation, not a security sandbox.",
         ],
     }
 

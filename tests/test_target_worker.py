@@ -184,6 +184,9 @@ class IsolatedVerificationTests(unittest.TestCase):
         execution = result.report["target_execution"]
         self.assertEqual((execution["mode"], execution["timeouts"]), ("isolated-worker-process", 1))
         self.assertIn("not a security sandbox", execution["note"])
+        limitations = result.report["target_search"]["limitations"]
+        self.assertFalse([text for text in limitations if "run in this process" in text])
+        self.assertTrue([text for text in limitations if "worker process" in text])
         json.loads(result.to_json())
         self.assertLess(elapsed, 15)
 
