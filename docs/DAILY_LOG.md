@@ -99,3 +99,26 @@ No log was kept that day; this entry is reconstructed from the commit history on
 - The participant guide's exact wording is still needed.
 
 **Next action:** review `feat/timeout-not-violation` (not merged). Then, with `META_MUSE_API_KEY` set, make a saved live call for Muse-proposed probe amounts (C) and measure it against literal mining (B).
+
+## 2026-10-28 (fourth session): source-amount probes for narrow defects
+
+**Merge recorded (verified at session start):** `feat/timeout-not-violation` was merged as `ba916b8`, after a docs-only README commit `375342a` (CI run 40652471927 succeeded). CI run 40652731402 on `ba916b8`: 371 passed, 2 skipped. `master` = `origin/master` = `ba916b8`, clean tree. Branch `feat/source-literal-probes` was created from `origin/master`.
+
+**Done:**
+- **Reproduced:** at the default budget, about 26 samples land in the gaps holding $777.77 (49,997 cents) and the 33-cent range (about a million cents). The nearest sample over 10 seeds came within $1.03 and $11.97 respectively. Both were missed in 0 of 40 search-enabled runs.
+- **Compared three methods on frozen corpus v2:**
+  - A (`master`) and A with probes off give identical metrics.
+  - **B** (literals in the target's source) finds both in 40 of 40. Detection 12/15 → 14/15, verdicts 25/27 → 27/27, false accusations 0/8, spurious claims 0.
+  - C: the saved live Muse response's six test points are all already derived, so it adds 0 probes. C was not run live because `META_MUSE_API_KEY` was not set.
+- `5c5d7db` added B. **Its first version made the computed-edge hold-out worse** (1/10 → 0/10 seeds), because the probes re-split the sampling bands. `cbcad53` fixed that before any documentation; the hold-out is back to 1/10.
+- `deeef62`: the probed amounts appear in the CLI summary and on the evidence page.
+
+**Validation:** 385 local tests OK. CLI exit codes unchanged: buggy 3, fixed 0, loophole 3, no reference 4, loophole with budget 0 → 0, no reference with L3 required → 5. The saved-live replay exits 3 and is labelled REPLAY. The demo exits 0. Benchmark B reproducible on a clean tree at `cbcad53`.
+
+**Open:**
+- Narrow defects at computed amounts.
+- B only helps Python targets whose source can be read.
+- A live Muse experiment (probes proposed from the target's source, with saved responses, measured against B) needs the key.
+- Branch not merged.
+
+**Next action:** review `feat/source-literal-probes`. With the key available, record and save live Muse probe proposals and measure them against B.
