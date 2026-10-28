@@ -113,6 +113,11 @@ def _proposal(case: Case, policy_text: str):
     return dataclasses.replace(proposal, document=dataclasses.replace(document, test_cases=cases))
 
 
+# Probe amounts written in each target's source (verify(source_probes=...)).
+# --no-source-probes turns it off, to measure the search without it.
+SOURCE_PROBES = True
+
+
 def run_case(case: Case, policy_text: str, *, isolated: bool, budget: int | None = None,
              seed: int = DEFAULT_SEED) -> dict:
     """Run one case and score its report. ``budget`` None: the case's own
@@ -129,6 +134,7 @@ def run_case(case: Case, policy_text: str, *, isolated: bool, budget: int | None
         target_timeout=DEFAULT_TARGET_TIMEOUT if isolated else None,
         target_time_limit=case.options.get("target_time_limit", DEFAULT_TIME_LIMIT),
         required_level=case.options.get("required_level"),
+        source_probes=SOURCE_PROBES,
     )
     seconds = time.perf_counter() - started
     text = result.to_json()
@@ -282,6 +288,7 @@ def _environment() -> dict:
     status = git("status", "--porcelain")
     return {
         "corpus_version": CORPUS_VERSION,
+        "source_probes": SOURCE_PROBES,
         "commit": git("rev-parse", "HEAD"),
         "working_tree_dirty": None if status is None else bool(status),
         "python": platform.python_version(),
@@ -362,6 +369,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seeds", type=int, default=SWEEP_SEEDS)
     parser.add_argument("--budgets", default=",".join(map(str, SWEEP_BUDGETS)))
     parser.add_argument("--skip-sweep", action="store_true")
+    parser.add_argument("--no-source-probes", action="store_true",
+                        help="do not probe amounts written in the targets' source")
     args = parser.parse_args(argv)
 
     json_path = args.output_dir / f"results-{args.label}.json"
@@ -370,6 +379,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {json_path} or {md_path} exists; pass --overwrite", file=sys.stderr)
         return 1
 
+    global SOURCE_PROBES
+    SOURCE_PROBES = not args.no_source_probes
     policy_text = POLICY.read_text(encoding="utf-8")
     results = {"environment": _environment()}
     first = [run_case(case, policy_text, isolated=True) for case in CASES]
