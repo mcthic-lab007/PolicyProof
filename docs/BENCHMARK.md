@@ -302,6 +302,54 @@ Experiment C with the target's code (one live pilot call, 2026-10-31) and method
 
 The rows above are from before `b434796`; this sweep is identical before and after the fix in `1021823`. After `b434796`, `off-by-one-cent`, `truncated-cents` and `bankers-rounding` are 10/10 exactly located at every budget from 250 up. They stay 10/0 at budget 0, where search is off by contract. Every other row is unchanged. Every interval found at a nonzero budget is now exactly located. No spurious claims were made anywhere in either sweep.
 
+## Corpus v3: special amounts that E cannot fold (frozen at `a027049`)
+
+**Why:** on v2, method E matched Muse, so v2 cannot show whether Muse adds anything. v3 keeps v2's 27 cases unchanged (`CORPUS_VERSION` "2" stays valid) and adds eight cases. Their special amounts are neither literals nor constant expressions E can fold. Select it with `benchmark.run --corpus 3`.
+
+**Frozen before measurement:**
+- `a027049` committed the targets (`benchmark/targets_v3.py`), the literal ground truth, the realistic/artificial labels and the per-method predictions (`benchmark/corpus_v3.py`), plus the ground-truth tests.
+- It was pushed before any method ran on v3.
+- The ground truth was checked by scanning every whole cent from $0.00 to $20,000.00, dated and undated. The tests repeat a ±$50 window around every interval, plus edges and 4,000 seeded samples per case.
+
+| Case | Mechanism | Defect (dated only) | Predicted before measurement |
+|---|---|---|---|
+| `converted-rounding-window` | realistic: currency conversion with run-time `quantize` | $2,007.49–$2,008.57 | A, B, E mostly miss (sampling may hit a few seeds) |
+| `loop-assembled-cent` | artificial: `sum()` over a generator | $1,500.07 | A, B, E miss |
+| `encoded-string-range` | realistic: range parsed from a config string | $7,531.24–$7,531.89 | A, B, E miss |
+| `integer-cents-table` | realistic: override table in integer cents | $6,543.21 | A, B, E miss (B probes $654,321.00) |
+| `helper-computed-range` | artificial: edges in a lambda helper | $2,500.13–$2,500.33 | A, B miss; **E finds** (it folds the lambda body) |
+| `imported-constant-cent` | artificial: value in another module | $8,642.13 | every method misses, Muse included: the excerpt shows one module |
+| `correct-quantized`, `correct-config-string` | realistic, correct | none | no accusation |
+
+**Measured on `a027049` (clean tree), A = `--no-source-probes`, B = default, E = `--constant-probes`:**
+
+| Method | Detection | Exact location | False accusations | Spurious claims | Verdicts | Search calls | Sweep exactly located (250 / 1000 / 2000 / 8000, of 180) |
+|---|---|---|---|---|---|---|---|
+| A | 12/21 | 12/21 | 0/10 | 0/605 | 27/35 | 51,546 | 90 / 91 / 92 / 94 |
+| B | 14/21 | 14/21 | 0/10 | 0/613 | 29/35 | 51,523 | 110 / 111 / 112 / 114 |
+| E | 15/21 | 15/21 | 0/10 | 0/617 | 30/35 | 51,519 | 130 / 130 / 131 / 133 |
+
+**On the new cases** (sweep, seeds out of 10 exactly located at budgets 250 / 1000 / 2000 / 8000):
+- `helper-computed-range`: A 0/0/0/0, B 0/0/0/0, **E 10/10/10/10**. This is the only new case E gains, as predicted.
+- `converted-rounding-window`: 0/0/1/3 for A, B and E alike. The hits are sampling luck at large budgets; none was at the default seed.
+- `loop-assembled-cent`, `encoded-string-range`, `integer-cents-table` and `imported-constant-cent`: 0 at every budget and seed, for every method.
+- Each missed defect exits 0, a false negative. That is why the verdicts are below 35/35.
+- No false accusation and no spurious claim anywhere, including the two new correct controls.
+- Every prediction held. The primary runs took about 30 s each. Only the wall-clock case `time-limit-exhausted` differed between the two primary passes.
+
+**What this sets up, and its limits:**
+- Four v3 defects, plus the rounding window, are deterministic failure cases for A, B and E. That gives Muse room to show value, or not.
+- **Two of them have cheap deterministic fixes that should be measured before crediting a model:**
+  - extract numbers from inside string literals (`encoded-string-range`);
+  - read large integer literals as cents (`integer-cents-table`).
+
+  A Muse win on those would be weak evidence. The stronger tests are `loop-assembled-cent` and `converted-rounding-window`, which need arithmetic over a loop or an inverted rounding condition. `imported-constant-cent` is a control that no current method can see.
+- **Not measured yet:** C, D and F on v3 need live calls, which have not been authorized.
+  - The harness is ready: `python -m benchmark.muse_probes record --corpus 3 --trials 1` makes 8 calls, one per new target, saved under `artifacts/muse_probes_v3/`.
+  - Then `sweep --corpus 3` scores them offline.
+  - **Estimated cost:** about $0.10 for 8 calls if usage matches the 2026-10-31 pilot (about 470 input and 2,900 output tokens per call, standard-mode prices). About $0.31 for 3 trials. Up to about 5× more if outputs are longer. These are estimates, not measurements.
+- The new targets were written by us, knowing which analyses would be measured. Their realism labels describe the mechanism, not the defect.
+
 ## What the evidence says
 
 1. **No false accusations and no spurious claims** (0/7 cases, 0/598 claims). When PolicyProof says "confirmed", the ground truth agreed every time in this corpus. The model-only, contradicting-expectation and conflicting-reference scenarios were correctly *not* confirmed.

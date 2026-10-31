@@ -238,3 +238,46 @@ No log was kept that day; this entry is reconstructed from the commit history on
 3. Decide how the demo presents Muse: as a proposer whose output PolicyProof checks, not as the source of a detection that E does not also make.
 
 **Commit identity (2026-10-31):** GitHub declined the push because the commits carried the author's private email. With the author's approval, the three unpushed commits were rebuilt on their identical trees with the account's noreply address, keeping messages, order and author dates. The new hashes are `c0a0fd8` (was `b60b386`), `eb79c45` (was `9f8ee66`) and `cf2eebc` (was `59b73da`). The originals are kept on the local branch `backup/muse-probe-experiment-59b73da`. `472257c` and everything earlier are unchanged.
+
+## 2026-10-31 (third session): push identity, merges, release check, corpus v3
+
+**Start state (verified):** `master` = `origin/master` = `ba916b8`; `feat/source-literal-probes` = `3b90f85` (CI run 40661340428 succeeded); `feat/muse-probe-experiment` was 3 commits ahead of its remote (`472257c`), with a clean tree.
+
+**Push identity:** with the author's approval, the three unpushed commits were rebuilt with the account's noreply address on identical trees (see the second session's note). The noreply address was derived from GitHub's public API (id 320630174) and GitHub's documented format. It is now this repository's local `user.email`. The originals are kept on the local branch `backup/muse-probe-experiment-59b73da`. `88b97d2` updated the docs' commit references. The branch was pushed normally as a fast-forward, with no force.
+
+**CI and merges (authorized by the author; each gated on tests, the frozen benchmark and CI):**
+- `88b97d2` (Muse branch): CI run 41201045754 succeeded, 451 passed and 2 skipped.
+- `c01da1b` = merge of `feat/source-literal-probes` into `master`.
+  - Its tree is identical to the branch.
+  - 385 tests OK.
+  - The benchmark reproduced the B review run exactly: 27 of 27 report hashes and the sweep identical.
+  - CI run 41202380081 succeeded, 383 passed and 2 skipped.
+- `68118fe` = merge of `feat/muse-probe-experiment`. Merging needed no rebase: the branch was stacked on the merged one, so no pushed history was rewritten.
+  - First rehearsed in a separate worktree. Its tree is identical to the branch.
+  - 453 tests OK.
+  - The default benchmark gave 14/15, 0/8, 27/27. E gave 14/15, 0/8, 27/27, with a sweep of 120/120.
+  - The A–F sweep reproduced fingerprint `8d510c36…69c0`.
+  - CI run 41225513697 succeeded, 451 passed and 2 skipped.
+- No branch was deleted. `master` = `origin/master` = `68118fe`.
+
+**Release check (the author chose "merged master is the release"; there is no deployment infrastructure):** a fresh clone of `origin/master` at `68118fe`, a new Python 3.12.14 venv, and `pip install -r requirements.txt`.
+- CLI exit codes: buggy 3, fixed 0, loophole 3, loophole with search budget 0 → 0, no reference 4, `--require-level L3` without a reference 5. All match the README.
+- The one-command demo exits 0 and writes four reports and four evidence pages.
+- 453 tests OK (2 skipped).
+
+**Corpus v3** (branch `feat/benchmark-v3` from `68118fe`):
+- `a027049` froze eight new cases, with ground truth and predictions, and was pushed before measurement.
+- Measured at 17:47 UTC on that commit:
+  - A: 12/21 detection;
+  - B: 14/21;
+  - E: 15/21; its one new find, `helper-computed-range`, was predicted.
+  - 0/10 false accusations and 0 spurious claims for all three.
+- Four new defects are missed by A, B and E at every budget and seed. The rounding window is hit only by sampling, in 1 of 10 seeds at budget 2000 and 3 of 10 at 8000.
+- `1296edc` prepared the Muse harness for v3.
+
+**Live calls:** none. **Validation:** 462 tests OK locally.
+
+**Next decision (the author's):**
+1. Authorize `record --corpus 3 --trials 1`: 8 calls, about $0.10 estimated.
+2. Before crediting Muse, measure the two cheap deterministic heuristics: numbers inside strings, and integers read as cents.
+3. Review and merge `feat/benchmark-v3`.

@@ -58,8 +58,10 @@ What was built for the Meta Global AI Developer Hackathon (2026-10-26 to 2026-11
 | 18 | Experiment harness: Muse Spark proposes probe amounts | `622588c` (10-28), pilot option `472257c` | Records live `muse-spark-1.3` proposals with prompt and usage, then scores them offline on the frozen corpus; proposals are only probes. One live pilot call on 2026-10-31 (see below) | `tests/test_muse_probes.py` (synthetic responses only) |
 | 19 | Constant-folding probes, method E (parse-only, opt-in) | `c0a0fd8` (10-31) | A bounded AST evaluator folds constant expressions in the target's source (`_BASE + Decimal(37) * CENT`) into probe amounts with derivations; unsupported expressions are reported; target code is never run | `tests/test_constant_folding.py`; computed-edge range 1/10 → 10/10 seeds, deterministic |
 | 20 | Muse probe seed sweep and evidence checks; `.env` key loading | `eb79c45` (10-31) | Offline methods A–F at equal budgets and the same ten seeds, correct-target controls, probe origins, fingerprint; stricter refusal of saved responses; key read only for live `record`, never printed | `tests/test_muse_probes.py`, `tests/test_muse_client.py`; [BENCHMARK.md](BENCHMARK.md) |
+| 21 | Benchmark corpus v3 (frozen before measurement) | `a027049` (10-31) | Eight cases whose special amounts E cannot fold (run-time rounding, loop, config string, cents table, lambda helper, imported constant); literal ground truth, realism labels and per-method predictions committed and pushed before any method was run | `tests/test_benchmark_v3.py`; A/B/E measured in [BENCHMARK.md](BENCHMARK.md) |
+| 22 | Muse probe harness for corpus v3 (**no live call yet**) | `1296edc` (10-31) | `--corpus 3` for record, evaluate and sweep; v3 evidence kept separate from v2 | `tests/test_muse_probes.py` (synthetic only) |
 
-Merge commits (`9dcfe54`, `5cc0f07`, `129433b`, `b2f75b9`, `7918fcb`, `7921aa3`, `e48006d`, `451e83b`) integrate the feature branches above and add no code of their own.
+Merge commits (`9dcfe54`, `5cc0f07`, `129433b`, `b2f75b9`, `7918fcb`, `7921aa3`, `e48006d`, `451e83b`, `2dee2a6`, `9a3adb1`, `ba916b8`, `c01da1b`, `68118fe`; the full list from `git log --merges master`) integrate the feature branches above and add no code of their own.
 
 ## Meta model usage: what Muse Spark does and what it does not
 
