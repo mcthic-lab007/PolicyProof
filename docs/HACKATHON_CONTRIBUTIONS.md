@@ -55,7 +55,9 @@ What was built for the Meta Global AI Developer Hackathon (2026-10-26 to 2026-11
 | 15 | Bounded edges for discrepancies seen only at evaluated points | `b434796` (10-28) | The edges of an off-by-one-cent bug are located and both sides are shown as evaluated | Six tests in `test_target_search.py`; benchmark exact location 12/15 → 13/15 |
 | 16 | Benchmark corpus v2; timeouts and crashes are not evaluations | `f21e7b0`, `3def8c0` (10-28) | A correct target slower than the timeout is no longer accused; the viewer lists unfinished calls | Tests in `test_target_worker.py`, `test_semantics.py` and `test_viewer.py`; false accusations 1/8 → 0/8 |
 | 17 | Source-amount probes (grey-box, parse-only) | `5c5d7db`, `cbcad53`, `deeef62` (10-28) | Probes the numeric literals in the target's own source before sampling; listed in the report, CLI and viewer | `tests/test_source_literals.py`; literal narrow defects 0/40 → 40/40 search-enabled runs |
-| 18 | Experiment harness: Muse Spark proposes probe amounts (**not yet run live**) | `622588c` (10-28) | Records live `muse-spark-1.3` proposals with prompt and usage, then scores them offline on the frozen corpus; proposals are only probes | `tests/test_muse_probes.py` (synthetic responses only) |
+| 18 | Experiment harness: Muse Spark proposes probe amounts | `622588c` (10-28), pilot option `472257c` | Records live `muse-spark-1.3` proposals with prompt and usage, then scores them offline on the frozen corpus; proposals are only probes. One live pilot call on 2026-10-31 (see below) | `tests/test_muse_probes.py` (synthetic responses only) |
+| 19 | Constant-folding probes, method E (parse-only, opt-in) | `b60b386` (10-31) | A bounded AST evaluator folds constant expressions in the target's source (`_BASE + Decimal(37) * CENT`) into probe amounts with derivations; unsupported expressions are reported; target code is never run | `tests/test_constant_folding.py`; computed-edge range 1/10 → 10/10 seeds, deterministic |
+| 20 | Muse probe seed sweep and evidence checks; `.env` key loading | `9f8ee66` (10-31) | Offline methods A–F at equal budgets and the same ten seeds, correct-target controls, probe origins, fingerprint; stricter refusal of saved responses; key read only for live `record`, never printed | `tests/test_muse_probes.py`, `tests/test_muse_client.py`; [BENCHMARK.md](BENCHMARK.md) |
 
 Merge commits (`9dcfe54`, `5cc0f07`, `129433b`, `b2f75b9`, `7918fcb`, `7921aa3`, `e48006d`, `451e83b`) integrate the feature branches above and add no code of their own.
 
@@ -68,6 +70,11 @@ Merge commits (`9dcfe54`, `5cc0f07`, `129433b`, `b2f75b9`, `7918fcb`, `7921aa3`,
 | Influence on results | Its thresholds seed the boundary test points; its rules and test cases are two of the four perspectives; it can **withhold** a confirmation | All findings, levels and exit codes |
 
 - **Live evidence:** one live call was made on 2026-10-27 at 15:11:37 UTC (`artifacts/muse_live_001.json`, `status: completed`, `model: muse-spark-1.3`). That file is git-ignored because it quotes the policy text and the API reported `store: true`. Replaying it is labelled `REPLAY_SAVED_LIVE_RESPONSE`, never `LIVE`.
+- **Second live call (probe proposals):** one call on 2026-10-31.
+  - Model `muse-spark-1.3`, response `resp_6ae5b0b5ee523841844848fd`, saved 09:11:16 UTC, 473 input and 2,873 output tokens.
+  - Saved, git-ignored, as `artifacts/muse_probes/benchmark-targets-narrow-computed-range/trial-1.json`, with the exact prompt and its SHA-256.
+  - Muse proposed the computed edges $2,000.37 and $2,000.52, among seven amounts. Their evaluation is an offline replay labelled `REPLAY_SAVED_LIVE_RESPONSE`.
+  - PolicyProof's deterministic constant folding (row 19) finds the same edges without a model, so Muse added no measured value beyond it on this corpus ([BENCHMARK.md](BENCHMARK.md)).
 - **Offline evidence:** the committed fixture is hand-written and labelled `REPLAY_SYNTHETIC`. It is not Muse output. The benchmark and offline demo use it so that anyone can reproduce them.
 
 ## Third-party dependencies and services

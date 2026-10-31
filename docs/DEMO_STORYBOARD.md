@@ -21,7 +21,13 @@ $py = ".\.venv\Scripts\python.exe"; $pol = "examples/democo_meal_policy.txt"
 | 2:30–2:50 | `docs/BENCHMARK.md` results tables | "We benchmarked the verifier itself against 27 seeded cases. Zero false accusations. 14 of 15 defects confirmed, each pinned to the cent. One-cent and 33-cent bugs far from any threshold were invisible to sampling, 0 of 40 runs. Reading the amounts written in the target's code finds them in 40 of 40, and a probe is still only a place to look. A bug at a computed amount is still found in only 1 of 10 seeds, and we say so. A hang is reported as unfinished, never as wrong." | Corpus v2: narrow literal defects 0/40 → 40/40; detection 12/15 → 14/15; false accusations 0/8; the computed-range miss | Same, as a static slide made from the file |
 | 2:50–3:00 | `docs/HACKATHON_CONTRIBUTIONS.md` | "Muse proposes; PolicyProof verifies. All of this was built during the hackathon, with AI coding assistants, and the contribution log lists each piece and its evidence." | The inventory table and the provenance section | None |
 
-**Possible addition, only if a live run succeeds:** a shot of Muse Spark reading the computed-range engine and proposing $2,000.37, followed by PolicyProof confirming the range. It would show Muse doing what literal mining can't. Use it only with a real saved live response, labelled REPLAY if it is replayed. If Muse doesn't find it, say so or leave the shot out. Today no such run exists.
+**Possible addition:** a shot of Muse Spark reading the computed-range engine and proposing $2,000.37 and $2,000.52, followed by PolicyProof confirming the range.
+- **The evidence exists:** one live call on 2026-10-31, response `resp_6ae5b0b5ee523841844848fd`, saved locally.
+  - A screen recording of the call itself would be LIVE footage.
+  - Anything shown afterwards is a replay and must be labelled REPLAY.
+- **Narration must not credit Muse with something only it can do.** Deterministic constant folding (method E in BENCHMARK.md) finds the same edges with no model, at every seed tested, and Muse added nothing beyond it.
+  - Honest line: "Muse read the code and proposed the hidden edges; PolicyProof ran them and confirmed the range. A deterministic analyzer finds these too, so the proposal is checked, never trusted."
+  - Do not say Muse finds what code analysis cannot.
 
 ## Before recording
 

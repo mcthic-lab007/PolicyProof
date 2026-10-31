@@ -118,13 +118,16 @@ Before the fix, a call that timed out or whose worker died had no decision. When
 | A: boundary points, ladder, sampling and bisection (`master`, `ba916b8`) | 12/15 | 0/8 | 12/15 | 90 / 91 / 91 / 91 | 39,546 | 25/27 |
 | A, measured on the branch with `--no-source-probes` | 12/15 | 0/8 | 12/15 | 90 / 91 / 91 / 91 | 39,546 | 25/27 |
 | **B: A plus amounts written in the target's source (`cbcad53`)** | **14/15** | **0/8** | **14/15** | **110 / 111 / 111 / 111** | 39,523 | **27/27** |
-| C: Muse Spark's proposed test amounts, policy only (replay of the one saved live response) | adds 0 points to A | — | — | — | — | — |
+| C (policy only): Muse Spark's proposed test amounts from the 2026-10-27 response (replay of that saved live response) | adds 0 points to A | — | — | — | — | — |
+| **E: B plus constant expressions folded from the source, no model (`b60b386`, `9f8ee66`)** | **14/15** | **0/8** | **14/15** | **120 / 120 / 120 / 120** | 39,510 | **27/27** |
+
+Experiment C with the target's code (one live pilot call, 2026-10-31) and method E are reported separately below.
 
 - **B** finds `single-cent-777.77` and `narrow-literal-range` in 40 of 40 search-enabled sweep runs (previously 0 of 40), all exactly located.
   - Both literal targets now exit 3; all other exit codes and levels are unchanged. Spurious claims stay at 0 (0/613 in the primary run, 0 in the sweep). Reproducible at `cbcad53`: yes. A review re-run at `e2f37b4` gave the same metrics and 26 of 27 identical reports; only the wall-clock-dependent `time-limit-exhausted` differed between its two passes.
   - In the primary run, B's 14/15 includes `narrow-computed-range`, found at the default seed exactly as with A. Over the sweep it is found in 1 of 10 seeds at budgets of 1000 and above, and 0 of 10 at 250, with or without B.
   - The remaining miss is `hangs-at-40`, which is by design (see corpus v2 above).
-- **C** was not run live: `META_MUSE_API_KEY` was not available this session.
+- **C (policy only)** was not run live in that session: `META_MUSE_API_KEY` was not available.
   - The one saved live `muse-spark-1.3` response (2026-10-27; 669 input and 6,231 output tokens, 5,525 of them reasoning) proposed test cases at $39.99, $40.00 and $40.01 only. All six of its test points are already derived boundary points, so they add no new probes.
   - Muse sees only the policy text, and neither $777.77 nor $12,345.67 appears in it. C cannot find these defects from the policy alone, however many trials are run.
   - Giving Muse the target's source would be a different method. It needs live calls and saved responses to be measured.
@@ -132,9 +135,118 @@ Before the fix, a call that timed out or whose worker died had no decision. When
 - **What B is and isn't.** B is a grey-box step: it reads the target function's source, and the module constants it names, with `ast`, and never executes it. It only helps when the faulty amount is written as a literal. The computed-range hold-out shows the limit: its edges, `LIMIT * 50 + 0.37`, are not literals. A source amount is a place to look, never evidence. A correct target whose source mentions $777.77 is still L3 (`tests/test_source_literals.py`).
 - **Corpus caveat.** Both literal targets were written by us, knowing that literal mining would be measured. On real engines, how often special cases are spelled as literals is unknown.
 
-### Experiment C with the target's code: prepared, not run
+### Experiment C with the target's code: one live pilot call, then an offline seed sweep
 
-**Status: no live call has been made.** `META_MUSE_API_KEY` was not set at process, user or machine scope on 2026-10-28. The harness is `benchmark/muse_probes.py`, on branch `feat/muse-probe-experiment`, which is stacked on `feat/source-literal-probes`. Its tests use only synthetic responses, labelled as such. They show that the mechanics work, and say nothing about Muse.
+**Status (2026-10-31): one live call made, for one target; the full run (63 calls) has not been made.** On 2026-10-28 no call was possible, because `META_MUSE_API_KEY` was not set. The harness is `benchmark/muse_probes.py`, on branch `feat/muse-probe-experiment`, which is stacked on `feat/source-literal-probes`. Its tests use only synthetic responses, labelled as such. They show that the mechanics work and say nothing about Muse.
+
+#### The live pilot call
+
+- **Call:** `python -B -m benchmark.muse_probes record --target benchmark.targets:narrow_computed_range --trials 1`. The key was read from the Git-ignored `.env` and never printed.
+- **Response:** model `muse-spark-1.3`, response id `resp_6ae5b0b5ee523841844848fd`, status `completed`, created 2026-10-31 09:11:17 UTC and saved at 09:11:16 UTC (the two timestamps come from different clocks).
+  - Usage: **473 input tokens and 2,873 output tokens**, 2,729 of them reasoning; 0 cached.
+- **Saved file:** `artifacts/muse_probes/benchmark-targets-narrow-computed-range/trial-1.json` (Git-ignored), SHA-256 `0f3ecfd3…f74f`. It carries the live-recording label and no synthetic-fixture note.
+  - It also records the exact 1,984-character prompt and its SHA-256 (`db1bc01b…bba`). That hash matches, and the prompt is byte-identical to what the harness builds today.
+- **Proposals: seven amounts**, all valid, 0 issues: $2,000.36, $2,000.37, $2,000.38, $2,000.44, $2,000.51, $2,000.52 and $2,000.53. Its reasons name the "hidden low edge `_LOW`" and "hidden high edge `_HIGH`".
+- **No answer leak:** none of the seven amounts appears in the prompt. The excerpt shows `_BASE = LIMIT * 50`, `_LOW = _BASE + Decimal(37) * CENT` and `_HIGH = _LOW + Decimal(15) * CENT`, with the `# 2000.37` comments removed. Muse computed the edges.
+- **Offline replay of this live evidence, primary configuration** (`evaluate`, isolated worker, budget 2000, default seed; output in `artifacts/benchmark/muse-pilot.json`):
+  - C: 12/15 detection, 0/8 false accusations, the same misses as A.
+  - D: 14/15 detection, 0/8 false accusations, the same misses as B.
+  - **No aggregate improvement.** Only one target has a Muse response, and at the default seed A already finds that target.
+
+#### Controlled seed sweep (offline replay of the live evidence)
+
+`python -B -m benchmark.muse_probes sweep --output artifacts/benchmark/muse-sweep.json`. It writes per-seed tables to `muse-sweep.md`; the network was blocked during both runs.
+
+**Controls:**
+- **Same work for every method:** the same corpus v2 case and ground truth (unchanged), the same target, the same budgets (0, 250, 1000, 2000, 8000) and the same ten seeds as `benchmark.run`'s sweep (20261104 and 1–9). Runs are in-process, like that sweep.
+- **Same budget:** probe amounts use part of the same call budget and never add calls. Over the target's search-enabled runs, C and D made 84,380 search calls against 84,425 for A and B.
+- **Deduplication and origin:** an amount proposed twice, or proposed and also found in the source, is probed once. Each row records which probe amounts came from the source, which from Muse, and which from both.
+- **Correct targets as false-accusation controls:** the four correct targets are probed with the same seven amounts.
+- **Evidence:** saved files with a missing or inconsistent input record (trial, target, model, corpus version, or a prompt that doesn't match its hash) are refused. So are duplicates, synthetic files without `--allow-synthetic`, and files of unknown origin. If an evidence file changes during the sweep, the results are discarded.
+
+**Results on `narrow-computed-range`** (detected / exactly located, of 10 seeds):
+
+| Budget | A: search | B: + source amounts | C: + Muse | D: + source + Muse |
+|---|---|---|---|---|
+| 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| 250 | 0 / 0 | 0 / 0 | **10 / 10** | **10 / 10** |
+| 1000 | 1 / 1 | 1 / 1 | **10 / 10** | **10 / 10** |
+| 2000 | 1 / 1 | 1 / 1 | **10 / 10** | **10 / 10** |
+| 8000 | 1 / 1 | 1 / 1 | **10 / 10** | **10 / 10** |
+
+- **The earlier 1-of-10 claim is reproduced.** A finds the range only at the default seed, at budgets of 1000 and above, and at no seed at 250. B is identical to A on every seed, because B finds $37.00, $15.00 and $50.00 in the source but not the computed edges.
+- **Seed by seed:**
+  - C gains the 9 seeds A misses at budgets 1000, 2000 and 8000, and all 10 at 250. It loses none.
+  - D against B is identical.
+  - Every found range is $2,000.37 to $2,000.52 with both edges exact.
+- **False accusations:** 0 in 800 control runs (4 correct targets × 10 seeds × 5 budgets × 4 methods). All controls ended at L3 with exit 0.
+- **Spurious claims on the target:** 0 of 160 claims for C and for D, and 0 of 12 for A and for B. Each method had 40 search-enabled runs on the target, with 4 claims per detection.
+- **Runtime:** about 132 s for the whole sweep (1,000 runs). C and D took within 0.5 s per budget of A and B.
+- **Reproducible:** a second full run gave the same fingerprint (`b78c87b5…5a35`) and 1,000 of 1,000 identical report hashes. The evidence file's hash was unchanged.
+
+**What this does and doesn't show:**
+- On this one target, one live Muse Spark response turned a 0–1 in 10 detection rate into 10 in 10, at equal budget, with no false accusations. That is the only improvement measured.
+- It is **one target and one trial**. The corpus-level metrics don't change.
+- The result measures the quality of a single response. Because the response named the exact edges, the bisection's success once they were probed is mechanical. Whether Muse proposes them reliably is unknown until more trials are run.
+- The target and the prompt were written by us. The prompt asks for "edges that the code computes from constants", knowing that this hold-out exists.
+- **A deterministic extension of B, method E (below), finds the same edges without a model, with identical results on every seed and budget.** So this measurement does not show that Muse is needed.
+- Every finding still comes from the target's and the reference's observed decisions. A proposal is a place to look.
+
+#### Method E: deterministic constant folding, the control for Muse
+
+**Design** (`src/policyproof/constant_folding.py`, `verify(constant_probes=True)`, `benchmark.run --constant-probes`; measured on the working tree that was then committed unchanged as `b60b386` and `9f8ee66`):
+- **Reads, never runs.** The target's source file is parsed with `ast`. Nothing from it is imported, called, `eval`-ed or `exec`-ed. A test forbids `eval`, `exec` and new imports during extraction.
+- **A bounded evaluator, not a Python interpreter:**
+  - int, float and `Decimal` literals;
+  - `Decimal(x)` only when `Decimal` provably comes from the `decimal` module;
+  - `+ - * / // %`, unary `-` and `+`, and `**` with an integer exponent of 0–12;
+  - Python's own type rules (`Decimal + float` is unsupported, as it would raise), in a context equal to `decimal`'s default;
+  - nesting, magnitude and candidate-count limits.
+- **Name resolution:** module-level and function-local names bound exactly once, followed transitively. Parameters, loop and except variables are runtime values.
+- **Reported, never guessed:** other calls, attributes and methods (`.quantize()`), imported names, names bound more than once or rebound by `global` or augmented assignment, cycles, division by zero, oversized values. Each comes with its line in the report's `constant_amounts.unsupported`.
+- **Provenance:** every folded amount lists the expressions it came from, for example `2000.37 ← line 103: _BASE + Decimal(37) * CENT`. E's candidates are B's literals plus the folded amounts. They are probed like any other hint, inside the same call budget.
+- **On the corpus:** E adds amounts beyond B only on `narrow_computed_range` ($0.15, $0.37, $2,000.00, $2,000.37, $2,000.52). On every other target it adds nothing.
+
+**Seed sweep, `narrow-computed-range`** (same evidence, budgets, seeds and controls as above; `artifacts/benchmark/muse-sweep-ef.json`):
+
+| Budget | A | B | C: + Muse | D: B + Muse | E: B + folding | F: E + Muse |
+|---|---|---|---|---|---|---|
+| 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 250 | 0 | 0 | 10 | 10 | **10** | 10 |
+| 1000 | 1 | 1 | 10 | 10 | **10** | 10 |
+| 2000 | 1 | 1 | 10 | 10 | **10** | 10 |
+| 8000 | 1 | 1 | 10 | 10 | **10** | 10 |
+
+(Each cell counts seeds of 10 that both detected and exactly located the range.)
+
+- **E against B:** E gains every seed B misses and loses none.
+- **C against E:** no seed differs, at any budget.
+- **F against E:** no seed differs; Muse adds nothing on top of E.
+- **Search calls:** C, D, E and F made 84,380 calls over the target's 40 search-enabled runs each, against 84,425 for A and B.
+- **Runtime:** E took 5.0 s against 4.5 s for C over the same runs. Extraction cost is small.
+- **False accusations:** 0 in 1,200 control runs (4 correct targets × 10 seeds × 5 budgets × 6 methods), all at L3.
+- **Spurious claims:** 0 of 160 for each of C, D, E and F.
+- **Unique candidates:**
+  - Muse proposed five amounts that E did not: $2,000.36, $2,000.38, $2,000.44, $2,000.51 and $2,000.53. Counting the one-cent neighbours, that is 7 probe points E does not make.
+  - All of them lie inside or next to a range whose edges E's probes already locate, so none changed a result.
+  - E's own extra candidates ($0.15, $0.37, $2,000.00, …) found nothing either.
+- **Reproducible:** two full A–F runs gave the same fingerprint (`8d510c36…69c0`) and 1,500 of 1,500 identical report hashes. The A–D rows are identical to the earlier A–D sweep (1,000 of 1,000), so adding E changed nothing else. The evidence file's hash was unchanged.
+
+**Across the corpus, E alone** (`benchmark.run --constant-probes`, `artifacts/benchmark/results-v2-E.*`):
+- **Primary run:** 14/15 detection, 0/8 false accusations, 0/613 spurious claims, 27/27 verdicts, 39,510 search calls. That is the same as B. B already finds this target at the default seed.
+- **Sweep:** 120/120 intervals exactly located at budgets 250, 1000, 2000 and 8000, against B's 110 / 111 / 111 / 111. Every interval B missed belongs to this target: 10 at budget 250 and 9 at each of the others. Spurious claims are 0 across the sweep.
+- **A and B unchanged:** with the flag off, every report is byte-identical to the run before E was wired in, except the wall-clock case `time-limit-exhausted`.
+
+**Conclusion:**
+- On frozen corpus v2, **Muse Spark's code-based proposals add no measured value beyond deterministic constant folding.** E matches C and D on every seed and budget, and F equals E.
+- The live call shows that Muse can read this code correctly. It does not show that Muse is necessary.
+- A Muse advantage could appear only on defects whose edges E cannot fold:
+  - computed through calls, methods (`.quantize()`) or loops;
+  - imported from other modules;
+  - written as strings, or held in data structures.
+
+  None of the corpus v2 targets is like that. Measuring such targets would need a new corpus version, committed before any measurement.
+- **Found during this work:** `examples/buggy_engine.py` begins with a UTF-8 byte-order mark. B's literal reader cannot parse it, so B reports "source could not be parsed" for that engine. E reads the mark correctly. This doesn't change B's results, because $40.00 is already a derived boundary point. B was not modified, to keep its results frozen.
 
 **Design, fixed before any live data:**
 - **Input to Muse:** the policy text, plus a code excerpt regenerated from the target's syntax tree (`source_literals.source_excerpt`):
@@ -167,7 +279,8 @@ Before the fix, a call that timed out or whose worker died had no decision. When
 - **Pilot first:** `python -m benchmark.muse_probes record --target benchmark.targets:narrow_computed_range --trials 1` makes exactly one live call. The full run waits for a cost review.
 - **Commands:**
   1. `python -m benchmark.muse_probes record`, with the key set in that shell only;
-  2. `python -m benchmark.muse_probes evaluate --output artifacts/benchmark/muse-probes.json`.
+  2. `python -m benchmark.muse_probes evaluate --output artifacts/benchmark/muse-probes.json`;
+  3. `python -m benchmark.muse_probes sweep --output artifacts/benchmark/muse-sweep.json` (offline: methods A–D per seed and budget).
 
 ### Budget and seed sweep (defect group, intervals found / exactly located)
 
@@ -208,5 +321,5 @@ The rows above are from before `b434796`; this sweep is identical before and aft
 ## Ranked next improvements (from this evidence)
 
 1. ~~Bound discrepancies seen at evaluated points.~~ Done in `b434796`; see above.
-2. ~~Close the narrow-defect gap for literal amounts.~~ Done with source-amount probes (B, `cbcad53`); see above. **Still open:** narrow defects at computed amounts (1 of 10 seeds). Also open: Muse Spark proposing probe amounts from the target's source, which needs a live key, saved responses, and a measurement against B as the deterministic control.
+2. ~~Close the narrow-defect gap for literal amounts.~~ Done with source-amount probes (B, `cbcad53`); see above. Narrow defects at computed amounts (1 of 10 seeds with B) are closed by method E (10 of 10, deterministic). One live Muse Spark response found the same edges, but added nothing beyond E (see experiment C and method E above). **Still open:** defects whose edges E cannot fold. Whether Muse helps there needs new targets in a new corpus version, committed before measurement, and live calls.
 3. ~~Stop counting timeouts as wrong answers.~~ Done in `3def8c0` (corpus v2); see above.
