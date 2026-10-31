@@ -169,7 +169,7 @@ No log was kept that day; this entry is reconstructed from the commit history on
 
 **Start state (verified):** branch `feat/muse-probe-experiment` = `origin/feat/muse-probe-experiment` = `472257c`, clean. `master` = `origin/master` = `ba916b8`. `feat/source-literal-probes` (`3b90f85`) is an ancestor of the branch. The author created a Git-ignored root `.env` holding `META_MUSE_API_KEY`. Nothing in the code loaded it, and the key was not set in the shell, user or machine environment.
 
-**Done (committed in the second session as `b60b386` and `9f8ee66`):**
+**Done (committed in the second session as `c0a0fd8` and `eb79c45`):**
 - **`.env` loader:** `muse_client.load_api_key_from_dotenv`, standard library only.
   - It reads `META_MUSE_API_KEY` alone, never overrides a key already set, and never prints it.
   - Only `muse_probes record` calls it; `evaluate` and `sweep` never read `.env`.
@@ -228,7 +228,7 @@ No log was kept that day; this entry is reconstructed from the commit history on
 
 **Conclusion:** on corpus v2, Muse's proposals add no measured value beyond deterministic constant folding. The live call shows that Muse read the code correctly, not that it is needed.
 
-**Validation:** 453 tests OK locally. `b60b386` alone passes in a clean worktree (426 OK, 2 skipped: the git-ignored live replay).
+**Validation:** 453 tests OK locally. `c0a0fd8` alone passes in a clean worktree (426 OK, 2 skipped: the git-ignored live replay).
 
 **Live calls:** not made; they need the author's authorization. Two more trials on `narrow_computed_range` would measure only Muse's consistency on a target where E already reaches the ceiling. They cannot show incremental value.
 
@@ -236,3 +236,5 @@ No log was kept that day; this entry is reconstructed from the commit history on
 1. Review E and the documentation.
 2. If Muse's value is to be tested, first add targets that E cannot fold (corpus v3, committed before any measurement), then make live calls on those.
 3. Decide how the demo presents Muse: as a proposer whose output PolicyProof checks, not as the source of a detection that E does not also make.
+
+**Commit identity (2026-10-31):** GitHub declined the push because the commits carried the author's private email. With the author's approval, the three unpushed commits were rebuilt on their identical trees with the account's noreply address, keeping messages, order and author dates. The new hashes are `c0a0fd8` (was `b60b386`), `eb79c45` (was `9f8ee66`) and `cf2eebc` (was `59b73da`). The originals are kept on the local branch `backup/muse-probe-experiment-59b73da`. `472257c` and everything earlier are unchanged.

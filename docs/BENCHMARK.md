@@ -119,7 +119,7 @@ Before the fix, a call that timed out or whose worker died had no decision. When
 | A, measured on the branch with `--no-source-probes` | 12/15 | 0/8 | 12/15 | 90 / 91 / 91 / 91 | 39,546 | 25/27 |
 | **B: A plus amounts written in the target's source (`cbcad53`)** | **14/15** | **0/8** | **14/15** | **110 / 111 / 111 / 111** | 39,523 | **27/27** |
 | C (policy only): Muse Spark's proposed test amounts from the 2026-10-27 response (replay of that saved live response) | adds 0 points to A | — | — | — | — | — |
-| **E: B plus constant expressions folded from the source, no model (`b60b386`, `9f8ee66`)** | **14/15** | **0/8** | **14/15** | **120 / 120 / 120 / 120** | 39,510 | **27/27** |
+| **E: B plus constant expressions folded from the source, no model (`c0a0fd8`, `eb79c45`)** | **14/15** | **0/8** | **14/15** | **120 / 120 / 120 / 120** | 39,510 | **27/27** |
 
 Experiment C with the target's code (one live pilot call, 2026-10-31) and method E are reported separately below.
 
@@ -194,7 +194,7 @@ Experiment C with the target's code (one live pilot call, 2026-10-31) and method
 
 #### Method E: deterministic constant folding, the control for Muse
 
-**Design** (`src/policyproof/constant_folding.py`, `verify(constant_probes=True)`, `benchmark.run --constant-probes`; measured on the working tree that was then committed unchanged as `b60b386` and `9f8ee66`):
+**Design** (`src/policyproof/constant_folding.py`, `verify(constant_probes=True)`, `benchmark.run --constant-probes`; measured on the working tree that was then committed unchanged as `c0a0fd8` and `eb79c45`):
 - **Reads, never runs.** The target's source file is parsed with `ast`. Nothing from it is imported, called, `eval`-ed or `exec`-ed. A test forbids `eval`, `exec` and new imports during extraction.
 - **A bounded evaluator, not a Python interpreter:**
   - int, float and `Decimal` literals;
