@@ -319,6 +319,12 @@ Remove-Item Env:META_MUSE_API_KEY
 
 You can then replay a saved response offline with `--replay artifacts/muse_live_001.json`.
 
+Alternatively, put `META_MUSE_API_KEY=...` in a root `.env` file, which is Git-ignored. `--live` reads that one key from it when the shell has none, and never prints it. To keep the evidence of a live verification run, add `--save-response PATH`. It saves Muse's raw response body, with its usage record, immediately after the call, and it refuses to replace an existing file:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.policyproof.verification examples/democo_meal_policy.txt --live --reference democo-meal --target democo-buggy --save-response artifacts/muse_live_002.json
+```
+
 During development, one live `muse-spark-1.3` call produced 3 rules and 6 test cases, and the validator accepted them. Replayed, they confirm the same $40.00 discrepancy, plus two `PRECEDENCE_DEPENDENT` findings: Muse's amount rules omit the date condition and rely on the review rule's priority, and Muse recorded that as an assumption. That saved response is **not** in this repository. The documented demo uses the synthetic fixture so anyone can reproduce it.
 
 ## Security and provenance
