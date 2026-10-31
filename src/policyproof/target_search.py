@@ -5,6 +5,8 @@ the target is a black box: it can be wrong at amounts the rules never
 mention. This module looks for such places and pins down their edges.
 
 Algorithm, run separately for each value of has_service_date:
+  0. Probe any ``hints`` first, each with one cent either side: amounts
+     written in the target's own source (see source_literals).
   1. Probe a fixed "round number" ladder, 1, 2, 2.5 and 5 x 10^k dollars
      (k = 0..6) and one cent either side, where human-written thresholds
      tend to sit.
@@ -109,9 +111,11 @@ def search(
     high: Decimal,
     seed: int = DEFAULT_SEED,
     budget: int = DEFAULT_BUDGET,
+    hints: tuple[Decimal, ...] = (),
 ) -> SearchOutcome:
     """Search the target. ``known`` holds judgements already made at the
-    evaluated points; they bound gaps and edges but cost nothing."""
+    evaluated points; they bound gaps and edges but cost nothing. ``hints``
+    are probed before everything else."""
     if isinstance(budget, bool) or not isinstance(budget, int) or not 0 <= budget <= MAX_BUDGET:
         raise ValueError(f"budget must be an integer from 0 to {MAX_BUDGET}")
     if isinstance(seed, bool) or not isinstance(seed, int):
@@ -135,7 +139,7 @@ def search(
         share = probe_budget // 2 + (probe_budget % 2 if index else 0)
         evaluated = sorted(a for (a, d) in observed if d == dated)
         rng = random.Random(f"policyproof-target-search:{seed}:{dated}")
-        for amount in _candidates(evaluated, low, high, rng, share):
+        for amount in _candidates(evaluated, low, high, rng, share, hints):
             call(amount, dated, "probe")
 
     def runs(dated: bool):
@@ -199,7 +203,7 @@ def _amount(cents: int) -> Decimal:
     return (Decimal(cents) * CENT).quantize(CENT)
 
 
-def _candidates(evaluated, low, high, rng, limit) -> list[Decimal]:
+def _candidates(evaluated, low, high, rng, limit, hints=()) -> list[Decimal]:
     taken = set(evaluated)
     chosen: list[Decimal] = []
 
@@ -208,13 +212,22 @@ def _candidates(evaluated, low, high, rng, limit) -> list[Decimal]:
             taken.add(amount)
             chosen.append(amount)
 
+    for hint in hints:
+        for amount in (hint - CENT, hint, hint + CENT):
+            take(amount)
+
+    ladder = set()
     for mantissa in LADDER_MANTISSAS:
         for exponent in LADDER_EXPONENTS:
             value = (mantissa * Decimal(10) ** exponent).quantize(CENT)
             for amount in (value - CENT, value, value + CENT):
                 take(amount)
+                if amount in taken:
+                    ladder.add(amount)
 
-    anchors = sorted(set(evaluated) | set(chosen) | {low, high})
+    # Hints do not split the sampling bands, so sampling is laid out as it
+    # would be without them; they only use up part of the probe budget.
+    anchors = sorted(set(evaluated) | ladder | {low, high})
     bands = []
     for a, b in zip(anchors, anchors[1:]):
         lo_c, hi_c = _cents(a) + 1, _cents(b) - 1

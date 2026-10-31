@@ -105,6 +105,33 @@ Before the fix, a call that timed out or whose worker died had no decision. When
   - `tests/test_semantics.py` changes its hang and crash expectations from `CONFIRMED` to `UNSUPPORTED`.
   - The viewer test now also checks that unfinished calls aren't described as agreement.
 
+### Narrow defects: three methods compared (corpus v2, unchanged)
+
+**Why they were missed.** At the default budget, each date value gets 750 probes. 84 of them are ladder probes; the rest are spread round-robin over power-of-ten bands between neighbouring anchors.
+- **$777.77:** the gap from $500.01 to $999.99 (49,997 cents) gets about 26 samples, so the chance of hitting the one wrong cent is roughly 0.05% per run.
+- **The 33-cent range at $12,345.67:** it lies in a gap of about a million cents, which also gets about 26 samples, roughly a 0.09% chance per run.
+- Measured over the 10 sweep seeds, the nearest sample came within $1.03 to $17.01 of $777.77, and within $11.97 to $468.45 of the range.
+- More budget doesn't close this. Even at the 100,000 maximum, the chance of a hit stays at a few percent.
+
+| Method | Detection | False accusations | Exact location | Sweep, exactly located (budgets 250 / 1000 / 2000 / 8000, of 120) | Search calls (primary) | Verdicts |
+|---|---|---|---|---|---|---|
+| A: boundary points, ladder, sampling and bisection (`master`, `ba916b8`) | 12/15 | 0/8 | 12/15 | 90 / 91 / 91 / 91 | 39,546 | 25/27 |
+| A, measured on the branch with `--no-source-probes` | 12/15 | 0/8 | 12/15 | 90 / 91 / 91 / 91 | 39,546 | 25/27 |
+| **B: A plus amounts written in the target's source (`cbcad53`)** | **14/15** | **0/8** | **14/15** | **110 / 111 / 111 / 111** | 39,523 | **27/27** |
+| C: Muse Spark's proposed test amounts, policy only (replay of the one saved live response) | adds 0 points to A | — | — | — | — | — |
+
+- **B** finds `single-cent-777.77` and `narrow-literal-range` in 40 of 40 search-enabled sweep runs (previously 0 of 40), all exactly located.
+  - Both literal targets now exit 3; all other exit codes and levels are unchanged. Spurious claims stay at 0 (0/613 in the primary run, 0 in the sweep). Reproducible at `cbcad53`: yes. A review re-run at `e2f37b4` gave the same metrics and 26 of 27 identical reports; only the wall-clock-dependent `time-limit-exhausted` differed between its two passes.
+  - In the primary run, B's 14/15 includes `narrow-computed-range`, found at the default seed exactly as with A. Over the sweep it is found in 1 of 10 seeds at budgets of 1000 and above, and 0 of 10 at 250, with or without B.
+  - The remaining miss is `hangs-at-40`, which is by design (see corpus v2 above).
+- **C** was not run live: `META_MUSE_API_KEY` was not available this session.
+  - The one saved live `muse-spark-1.3` response (2026-10-27; 669 input and 6,231 output tokens, 5,525 of them reasoning) proposed test cases at $39.99, $40.00 and $40.01 only. All six of its test points are already derived boundary points, so they add no new probes.
+  - Muse sees only the policy text, and neither $777.77 nor $12,345.67 appears in it. C cannot find these defects from the policy alone, however many trials are run.
+  - Giving Muse the target's source would be a different method. It needs live calls and saved responses to be measured.
+- **First version of B and its side effect.** At first, the source-amount probes also served as band boundaries for the random sampling. That moved the samples, and the computed-edge hold-out dropped from 1 of 10 seeds to 0 of 10. Measured in that first run: sweep 110/110/110/110, primary 13/15, and the hold-out missed at the default seed. `cbcad53` lays the bands out exactly as without source probes; the probes only use part of the budget. The table shows the corrected version.
+- **What B is and isn't.** B is a grey-box step: it reads the target function's source, and the module constants it names, with `ast`, and never executes it. It only helps when the faulty amount is written as a literal. The computed-range hold-out shows the limit: its edges, `LIMIT * 50 + 0.37`, are not literals. A source amount is a place to look, never evidence. A correct target whose source mentions $777.77 is still L3 (`tests/test_source_literals.py`).
+- **Corpus caveat.** Both literal targets were written by us, knowing that literal mining would be measured. On real engines, how often special cases are spelled as literals is unknown.
+
 ### Budget and seed sweep (defect group, intervals found / exactly located)
 
 | Case | 0 | 250 | 1000 | 2000 | 8000 |
@@ -144,7 +171,5 @@ The rows above are from before `b434796`; this sweep is identical before and aft
 ## Ranked next improvements (from this evidence)
 
 1. ~~Bound discrepancies seen at evaluated points.~~ Done in `b434796`; see above.
-2. **Close the narrow-defect gap** (0 of 40 search-enabled runs for the single cent and the 33-cent range). There are two candidates, and both should be measured on this corpus, including the computed-edge hold-out:
-   - mine numeric literals from the target's source (deterministic grey-box probing). It should catch the two literal cases but not the computed range;
-   - have **Muse Spark propose adversarial probe amounts**, which PolicyProof then judges. Muse could only add test points, never decide an outcome. Replayed responses would keep the benchmark reproducible.
+2. ~~Close the narrow-defect gap for literal amounts.~~ Done with source-amount probes (B, `cbcad53`); see above. **Still open:** narrow defects at computed amounts (1 of 10 seeds). Also open: Muse Spark proposing probe amounts from the target's source, which needs a live key, saved responses, and a measurement against B as the deterministic control.
 3. ~~Stop counting timeouts as wrong answers.~~ Done in `3def8c0` (corpus v2); see above.

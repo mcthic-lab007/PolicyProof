@@ -125,6 +125,7 @@ from src.policyproof.target_search import (
     SearchOutcome,
     search as search_target,
 )
+from src.policyproof.source_literals import SourceAmounts, source_amounts
 
 
 REPORT_VERSION = "1"
@@ -269,12 +270,16 @@ def verify(
     target_timeout: float | None = None,
     target_time_limit: float = DEFAULT_TIME_LIMIT,
     required_level: str | None = None,
+    source_probes: bool = True,
 ) -> VerificationResult:
     """Verify a rule document against ``policy_text``. The document is
     re-validated against this policy text first, so L0 never rests on where
     the document came from. When a target is given, it is also searched
     between the evaluated points (see target_search) within
-    ``search_budget`` target calls; 0 disables the search. Problems in the
+    ``search_budget`` target calls; 0 disables the search. With
+    ``source_probes``, amounts written in the target's own source are probed
+    first (see source_literals); they are probes, never evidence by
+    themselves. Problems in the
     model's output become findings; this raises only for invalid arguments."""
     if not isinstance(policy_text, str) or not policy_text.strip():
         raise ValueError("policy_text must be a non-empty string")
@@ -325,6 +330,7 @@ def verify(
         run_target = partial(_run, target)
 
     outcome: SearchOutcome | None = None
+    hints: SourceAmounts | None = None
     search_points: list[PointResult] = []
     try:
         results = tuple(
@@ -333,7 +339,11 @@ def verify(
         )
         findings += _findings(document, results, reference, target)
         if run_target is not None and search_budget > 0:
-            outcome = _search(engine, results, reference, run_target, search_budget, search_seed)
+            if source_probes:
+                low, high = NUMERIC_DOMAINS["amount"]
+                hints = source_amounts(target.decide, low, high)
+            outcome = _search(engine, results, reference, run_target, search_budget, search_seed,
+                              hints.amounts if hints else ())
             range_findings, search_points = _range_findings(outcome, results, document, reference)
             findings += range_findings
             if outcome.unjudged:
@@ -356,7 +366,7 @@ def verify(
         excluded_points=list(derivation.excluded),
         points=[_point_record(result) for result in (*results, *search_points)],
         findings=[_finding_record(finding) for finding in findings],
-        target_search=_search_section(outcome, target, search_budget, reference),
+        target_search=_search_section(outcome, target, search_budget, reference, hints),
         target_execution=_execution_section(target, worker),
     )
     report["verification"]["result"] = verdict(findings, level, required_level)
@@ -623,7 +633,7 @@ def _agrees(evaluation: Evaluation, reference: Outcome | None, target: Outcome) 
     return target.decision == evaluation.decision
 
 
-def _search(engine, results, reference, run_target, budget, seed) -> SearchOutcome:
+def _search(engine, results, reference, run_target, budget, seed, hints=()) -> SearchOutcome:
     low, high = NUMERIC_DOMAINS["amount"]
     known = {
         (r.amount, r.has_service_date): Judgement(
@@ -639,7 +649,7 @@ def _search(engine, results, reference, run_target, budget, seed) -> SearchOutco
         tgt = run_target(case)
         return Judgement(_agrees(evaluation, ref, tgt), (evaluation, ref, tgt))
 
-    return search_target(judge, known, low=low, high=high, seed=seed, budget=budget)
+    return search_target(judge, known, low=low, high=high, seed=seed, budget=budget, hints=hints)
 
 
 def _search_point_id(amount: Decimal, dated: bool) -> str:
@@ -805,7 +815,8 @@ def _execution_section(target, worker: TargetWorker | None) -> dict[str, Any]:
     }
 
 
-def _search_section(outcome: SearchOutcome | None, target, budget, reference) -> dict[str, Any]:
+def _search_section(outcome: SearchOutcome | None, target, budget, reference,
+                    hints: SourceAmounts | None = None) -> dict[str, Any]:
     if outcome is None:
         reason = "no target supplied" if target is None else "search budget is 0"
         return {"performed": False, "reason": reason}
@@ -820,8 +831,18 @@ def _search_section(outcome: SearchOutcome | None, target, budget, reference) ->
         "budget_exhausted": outcome.budget_exhausted,
         "unjudged_evaluations": outcome.unjudged,
         "ranges_found": len(outcome.ranges),
+        "source_amounts": {"used": False, "reason": "disabled"} if hints is None else {
+            "used": True,
+            "read_from": hints.source,
+            "unavailable": hints.unavailable,
+            "amounts": [str(a) for a in hints.amounts],
+            "note": "Amounts written in the target's own source, probed with one cent either "
+                    "side before the ladder. The source was parsed, never executed; a probe is "
+                    "evidence only through the decisions actually observed there.",
+        },
         "strategy": (
-            "For each value of has_service_date: a round-number ladder (1, 2, 2.5 and 5 x 10^k "
+            "For each value of has_service_date: amounts written in the target's source and "
+            "one cent either side (when enabled), then a round-number ladder (1, 2, 2.5 and 5 x 10^k "
             "dollars and one cent either side), then seeded samples spread over power-of-ten "
             "bands between neighbouring evaluated amounts, then bisection to one cent at the "
             f"edges of every range. 1/{BISECTION_SHARE} of the budget is reserved for bisection."
@@ -1292,6 +1313,8 @@ def main(argv: list[str] | None = None) -> int:
                         "minimum)")
     parser.add_argument("--search-seed", type=int, default=DEFAULT_SEED, metavar="SEED",
                         help=f"seed for the target search (default {DEFAULT_SEED})")
+    parser.add_argument("--no-source-probes", action="store_true",
+                        help="do not probe amounts written in the target's source code")
     args = parser.parse_args(argv)
 
     if args.overwrite and not args.report:
@@ -1315,6 +1338,7 @@ def main(argv: list[str] | None = None) -> int:
             proposal.document, policy_text, proposal=proposal,
             reference=references.get(args.reference), target=targets.get(args.target),
             search_budget=args.search_budget, search_seed=args.search_seed,
+            source_probes=not args.no_source_probes,
             target_timeout=args.target_timeout or None, target_time_limit=args.target_time_limit,
             required_level=args.require_level,
         )
@@ -1353,6 +1377,12 @@ def _print_summary(result: VerificationResult) -> None:
               f"budget of {search['budget']}, seed {search['seed']}; "
               f"{search['ranges_found']} discrepancy range(s) found, "
               f"{search['unjudged_evaluations']} evaluation(s) not judged. Sampling, not exhaustive.")
+        source = search.get("source_amounts", {})
+        if source.get("used") and source.get("amounts"):
+            print(f"Source amounts probed: {', '.join('$' + a for a in source['amounts'])} "
+                  f"(read from {source['read_from']}; parsed, not executed).")
+        elif source.get("used"):
+            print(f"Source amounts probed: none ({source.get('unavailable') or 'no amounts in the source'}).")
     for finding in result.findings:
         points = f" [{', '.join(finding.points)}]" if finding.points and finding.code != "CHECKED" else ""
         print(f"{finding.severity.upper():<7} {finding.code}: {finding.summary}{points}")

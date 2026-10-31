@@ -260,8 +260,17 @@ def _search_summary(search: Any) -> str:
         "discrepancy range(s) found"
         + (f"; {_e(search.get('unjudged_evaluations'))} call(s) could not be judged, so nothing is "
            "concluded there" if search.get("unjudged_evaluations") else "")
-        + ". This is sampling, not exhaustive checking.</p>\n"
+        + ". This is sampling, not exhaustive checking."
+        + _source_amounts(search.get("source_amounts")) + "</p>\n"
     )
+
+
+def _source_amounts(source: Any) -> str:
+    if not isinstance(source, dict) or not source.get("amounts"):
+        return ""
+    amounts = ", ".join("$" + _e(a) for a in source["amounts"])
+    return (f" Amounts written in the target's source were probed first: {amounts} (read from "
+            f"{_e(source.get('read_from'))}; parsed, not executed). They are probes, not evidence.")
 
 
 def _headline(findings, points, rules, report) -> str:

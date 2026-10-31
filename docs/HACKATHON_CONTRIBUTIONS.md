@@ -54,6 +54,7 @@ What was built for the Meta Global AI Developer Hackathon (2026-10-26 to 2026-11
 | 14 | Provenance audit of `496bc75` | `045a74a` (10-28) | Records outside Git checked; findings in this document | — |
 | 15 | Bounded edges for discrepancies seen only at evaluated points | `b434796` (10-28) | The edges of an off-by-one-cent bug are located and both sides are shown as evaluated | Six tests in `test_target_search.py`; benchmark exact location 12/15 → 13/15 |
 | 16 | Benchmark corpus v2; timeouts and crashes are not evaluations | `f21e7b0`, `3def8c0` (10-28) | A correct target slower than the timeout is no longer accused; the viewer lists unfinished calls | Tests in `test_target_worker.py`, `test_semantics.py` and `test_viewer.py`; false accusations 1/8 → 0/8 |
+| 17 | Source-amount probes (grey-box, parse-only) | `5c5d7db`, `cbcad53`, `deeef62` (10-28) | Probes the numeric literals in the target's own source before sampling; listed in the report, CLI and viewer | `tests/test_source_literals.py`; literal narrow defects 0/40 → 40/40 search-enabled runs |
 
 Merge commits (`9dcfe54`, `5cc0f07`, `129433b`, `b2f75b9`, `7918fcb`, `7921aa3`, `e48006d`, `451e83b`) integrate the feature branches above and add no code of their own.
 
