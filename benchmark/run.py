@@ -116,13 +116,18 @@ def _proposal(case: Case, policy_text: str):
 # Probe amounts written in each target's source (verify(source_probes=...)).
 # --no-source-probes turns it off, to measure the search without it.
 SOURCE_PROBES = True
+# Constant expressions in each target's source, folded (method E,
+# verify(constant_probes=...)). Off unless --constant-probes is given.
+CONSTANT_PROBES = False
 
 
 def run_case(case: Case, policy_text: str, *, isolated: bool, budget: int | None = None,
              seed: int = DEFAULT_SEED, source_probes: bool | None = None,
-             proposed_probes: tuple = (), proposed_origin: str | None = None) -> dict:
+             proposed_probes: tuple = (), proposed_origin: str | None = None,
+             keep_report: bool = False, constant_probes: bool | None = None) -> dict:
     """Run one case and score its report. ``budget`` None: the case's own
-    budget, or the CLI default."""
+    budget, or the CLI default. ``keep_report`` adds the full report under
+    "report" for callers that need more than the score."""
     if budget is None:
         budget = case.options.get("search_budget", DEFAULT_BUDGET)
     proposal = _proposal(case, policy_text)
@@ -137,6 +142,7 @@ def run_case(case: Case, policy_text: str, *, isolated: bool, budget: int | None
         required_level=case.options.get("required_level"),
         source_probes=SOURCE_PROBES if source_probes is None else source_probes,
         proposed_probes=proposed_probes, proposed_probes_origin=proposed_origin,
+        constant_probes=CONSTANT_PROBES if constant_probes is None else constant_probes,
     )
     seconds = time.perf_counter() - started
     text = result.to_json()
@@ -145,6 +151,8 @@ def run_case(case: Case, policy_text: str, *, isolated: bool, budget: int | None
         case=case.id, group=case.group, budget=budget, seed=seed, isolated=isolated,
         seconds=round(seconds, 3), report_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
     )
+    if keep_report:
+        scored["report"] = result.report
     return scored
 
 
@@ -261,9 +269,14 @@ def summarize(rows: list[dict]) -> dict:
     }
 
 
+def sweep_seeds(seeds: int) -> list[int]:
+    """The sweep's seeds: the default seed, then 1 .. seeds-1."""
+    return [DEFAULT_SEED] + list(range(1, seeds))
+
+
 def sweep(policy_text: str, budgets, seeds: int) -> list[dict]:
     cases = [c for c in CASES if c.group == DEFECT]
-    seed_values = [DEFAULT_SEED] + list(range(1, seeds))
+    seed_values = sweep_seeds(seeds)
     rows = []
     for budget in budgets:
         for case in cases:
@@ -291,6 +304,7 @@ def _environment() -> dict:
     return {
         "corpus_version": CORPUS_VERSION,
         "source_probes": SOURCE_PROBES,
+        "constant_probes": CONSTANT_PROBES,
         "commit": git("rev-parse", "HEAD"),
         "working_tree_dirty": None if status is None else bool(status),
         "python": platform.python_version(),
@@ -373,6 +387,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-sweep", action="store_true")
     parser.add_argument("--no-source-probes", action="store_true",
                         help="do not probe amounts written in the targets' source")
+    parser.add_argument("--constant-probes", action="store_true",
+                        help="also probe constant expressions folded from the targets' source (method E)")
     args = parser.parse_args(argv)
 
     json_path = args.output_dir / f"results-{args.label}.json"
@@ -381,8 +397,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {json_path} or {md_path} exists; pass --overwrite", file=sys.stderr)
         return 1
 
-    global SOURCE_PROBES
+    global SOURCE_PROBES, CONSTANT_PROBES
     SOURCE_PROBES = not args.no_source_probes
+    CONSTANT_PROBES = args.constant_probes
     policy_text = POLICY.read_text(encoding="utf-8")
     results = {"environment": _environment()}
     first = [run_case(case, policy_text, isolated=True) for case in CASES]
