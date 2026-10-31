@@ -50,6 +50,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 
+from benchmark import corpus_v3
 from benchmark.corpus import CASES, CORPUS_VERSION, CORRECT, DEFECT, FAILURE, Case
 from src.policyproof import reference as reference_module
 from src.policyproof.muse_client import replay_proposal
@@ -387,6 +388,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-sweep", action="store_true")
     parser.add_argument("--no-source-probes", action="store_true",
                         help="do not probe amounts written in the targets' source")
+    parser.add_argument("--corpus", choices=("2", "3"), default="2",
+                        help="ground-truth corpus: 2 (default) or 3 (adds cases E cannot fold)")
     parser.add_argument("--constant-probes", action="store_true",
                         help="also probe constant expressions folded from the targets' source (method E)")
     args = parser.parse_args(argv)
@@ -397,7 +400,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {json_path} or {md_path} exists; pass --overwrite", file=sys.stderr)
         return 1
 
-    global SOURCE_PROBES, CONSTANT_PROBES
+    global SOURCE_PROBES, CONSTANT_PROBES, CASES, CORPUS_VERSION
+    if args.corpus == "3":
+        CASES, CORPUS_VERSION = corpus_v3.CASES, corpus_v3.CORPUS_VERSION
     SOURCE_PROBES = not args.no_source_probes
     CONSTANT_PROBES = args.constant_probes
     policy_text = POLICY.read_text(encoding="utf-8")
