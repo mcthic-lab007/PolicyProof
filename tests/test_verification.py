@@ -484,9 +484,13 @@ class ReportTests(unittest.TestCase):
 
 
 class CommandLineTests(unittest.TestCase):
-    def run_main(self, argv, environ=None):
+    def run_main(self, argv, environ=None, dotenv=None):
+        # DOTENV points at a missing file unless a test supplies one, so the
+        # developer's real .env is never read.
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.dict(verification.sys.modules["os"].environ, environ or {}, clear=True), \
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(verification, "DOTENV", dotenv or Path(tmp) / "missing.env"), \
+                mock.patch.dict(verification.sys.modules["os"].environ, environ or {}, clear=True), \
                 mock.patch.object(requests.Session, "send", side_effect=AssertionError("network")), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = verification.main(argv)
@@ -532,6 +536,96 @@ class CommandLineTests(unittest.TestCase):
         code, _, err = self.run_main([str(POLICY_PATH), "--live"])
         self.assertEqual(code, 1)
         self.assertIn(API_KEY_ENV, err)
+
+    # --- live mode with --save-response: a fake transport, never the network.
+    def fake_live(self, body):
+        """MuseClient.from_env replaced by a client whose transport returns
+        ``body``; records the calls. The body is synthetic, not Muse output."""
+        calls = []
+
+        class Response:
+            status_code = 200
+
+            def json(self):
+                return body
+
+        def transport(url, **kwargs):
+            calls.append(kwargs["json"])
+            return Response()
+
+        from src.policyproof.muse_client import MuseClient
+        client = MuseClient("test-key-not-real-0123", transport=transport)
+        return calls, mock.patch.object(verification.MuseClient, "from_env", lambda *a, **k: client)
+
+    def synthetic_body(self):
+        body = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        body.pop("_policyproof_fixture_note", None)
+        return body
+
+    def test_live_save_response_keeps_the_raw_body_and_verifies(self):
+        from src.policyproof.muse_client import RECORDING_KEY
+        calls, patch = self.fake_live(self.synthetic_body())
+        with tempfile.TemporaryDirectory() as tmp, patch:
+            path = Path(tmp) / "live.json"
+            code, out, _ = self.run_main([str(POLICY_PATH), "--live", "--reference", "democo-meal",
+                                          "--target", "democo-buggy", "--save-response", str(path)])
+            self.assertEqual((code, len(calls)), (3, 1))
+            lines = out.splitlines()
+            self.assertTrue(lines[0].startswith("Saved the live response body"))  # saved before anything else
+            self.assertTrue(lines[1].startswith("LIVE: Muse Spark API response"))
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertIn(RECORDING_KEY, saved)
+            self.assertEqual(saved["id"], self.synthetic_body()["id"])
+            self.assertNotIn("test-key-not-real", path.read_text(encoding="utf-8"))
+            # The saved body replays as saved live evidence, never as LIVE.
+            code, out, _ = self.run_main([str(POLICY_PATH), "--replay", str(path), "--reference",
+                                          "democo-meal", "--target", "democo-buggy"])
+            self.assertEqual(code, 3)
+            self.assertFalse(out.startswith("LIVE"))
+
+    def test_live_save_response_refuses_existing_file_before_calling(self):
+        calls, patch = self.fake_live(self.synthetic_body())
+        with tempfile.TemporaryDirectory() as tmp, patch:
+            path = Path(tmp) / "live.json"
+            path.write_text("keep me", encoding="utf-8")
+            code, _, err = self.run_main([str(POLICY_PATH), "--live", "--save-response", str(path)])
+            self.assertEqual((code, calls), (1, []))
+            self.assertIn("never replaced", err)
+            self.assertEqual(path.read_text(encoding="utf-8"), "keep me")
+
+    def test_save_response_is_live_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, _, err = self.run_main(self.base("--save-response", str(Path(tmp) / "x.json")))
+            self.assertEqual(code, 1)
+            self.assertIn("live calls", err)
+            self.assertFalse((Path(tmp) / "x.json").exists())
+
+    def test_rejected_live_proposal_is_saved_too(self):
+        body = self.synthetic_body()
+        body["output"][0]["content"][0]["text"] = "{}"
+        calls, patch = self.fake_live(body)
+        with tempfile.TemporaryDirectory() as tmp, patch:
+            path = Path(tmp) / "live.json"
+            code, _, _ = self.run_main([str(POLICY_PATH), "--live", "--save-response", str(path)])
+            self.assertEqual((code, len(calls)), (2, 1))
+            self.assertTrue(path.exists())
+
+    def test_live_reads_the_key_from_dotenv_and_replay_never_does(self):
+        seen = []
+        with tempfile.TemporaryDirectory() as tmp:
+            dotenv = Path(tmp) / ".env"
+            dotenv.write_text(f"{API_KEY_ENV}=test-key-from-dotenv-0123\n", encoding="utf-8")
+
+            def from_env(*args, **kwargs):
+                seen.append(verification.sys.modules["os"].environ.get(API_KEY_ENV))
+                raise verification.MuseClientError("stop before any call")
+            with mock.patch.object(verification.MuseClient, "from_env", from_env):
+                code, out, err = self.run_main([str(POLICY_PATH), "--live"], dotenv=dotenv)
+            self.assertEqual((code, seen), (1, ["test-key-from-dotenv-0123"]))
+            self.assertNotIn("test-key-from-dotenv", out + err)
+            with mock.patch.object(verification, "load_api_key_from_dotenv") as load:
+                self.run_main(self.base("--target", "democo-fixed"), dotenv=dotenv)
+                load.assert_not_called()
 
     def test_rejected_replay_exits_2(self):
         body = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
