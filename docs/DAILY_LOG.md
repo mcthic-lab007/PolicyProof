@@ -122,3 +122,119 @@ No log was kept that day; this entry is reconstructed from the commit history on
 - Branch not merged.
 
 **Next action:** review `feat/source-literal-probes`. With the key available, record and save live Muse probe proposals and measure them against B.
+
+## 2026-10-28 (fifth session): review of method B; experiment C prepared
+
+**Start state (verified):**
+- `master` = `origin/master` = `ba916b8`.
+- `feat/source-literal-probes` = its remote = `e2f37b4`, clean. CI run 40657124464 belongs to `e2f37b4` and succeeded.
+- `artifacts/` is ignored by Git and intact.
+- `META_MUSE_API_KEY` is not set at process, user or machine scope, so **no live call was made**.
+
+**Review of B:**
+- Parsing is safe on decorated functions, methods, nested functions, `functools.partial`, callable instances, builtins, a malformed file and a deleted file. It never raised, and it never ran the target.
+- Re-ran the benchmark at `e2f37b4`: the same metrics, and 26 of 27 reports identical to the `cbcad53` run (`time-limit-exhausted` is wall-clock dependent).
+- Checked the 40/40 per budget from the sweep records.
+- The BENCHMARK.md tables are well formed. One wording correction was committed as `3b90f85`.
+
+**Experiment C prepared** on `feat/muse-probe-experiment`, stacked on the B branch:
+- `622588c` adds `record` (live) and `evaluate` (offline), the proposed-probe support in `verify()`, and `MuseClient.complete()`.
+- Muse receives code with comments and docstrings removed and the function renamed, because the corpus targets' docstrings state their bugs.
+
+**Validation:** 394 local tests OK. Benchmark B unchanged on this branch (14/15, 0/8, 27/27, reproducible). CLI exit codes unchanged: buggy 3, fixed 0, loophole 3, no reference 4, loophole with budget 0 → 0, no reference with L3 required → 5. The saved-live replay exits 3 and is labelled REPLAY. The demo exits 0.
+
+**Blocker:** a live key.
+
+**Next action:**
+1. With the key set in one shell, run `python -m benchmark.muse_probes record` (63 calls by default; check the cost first).
+2. Then run `evaluate`, and report C and D against A and B.
+3. Review the two branches in order.
+
+## 2026-10-28 (sixth session): live pilot blocked; pilot path and cost estimate prepared
+
+**Start state (verified):** `master` = `origin/master` = `ba916b8`. `feat/source-literal-probes` = `3b90f85` and `feat/muse-probe-experiment` = `fdcf289`, both matching their remotes and clean. The B branch is an ancestor of the experiment branch.
+
+**Live call: none.** `META_MUSE_API_KEY` is not set at process, user or machine scope.
+
+**Done:**
+- Added `record --target` for a one-call pilot, with a test, and a token summary printed after each live call.
+- Dry-ran `evaluate` on one labelled synthetic file: refused without `--allow-synthetic`, then labelled `REPLAY_SYNTHETIC`. The proposed edge located the computed range, and the fixed engine stayed at L3. One trial takes about 33 s.
+- **Pricing:** checked against Meta's pricing page. Cost estimated from real prompt sizes; see BENCHMARK.md.
+
+**Next decision (the author's):**
+1. Set the key in one shell and run the one-call pilot (about $0.03–$0.13 estimated).
+2. After the pilot's measured usage, decide on the full 63 calls (about $1.70–$8.40 estimated) and choose the tier. Contributor mode is cheaper but allows Meta to use the content for training.
+
+## 2026-10-31: first live Muse probe call; offline seed sweep A–D
+
+**Start state (verified):** branch `feat/muse-probe-experiment` = `origin/feat/muse-probe-experiment` = `472257c`, clean. `master` = `origin/master` = `ba916b8`. `feat/source-literal-probes` (`3b90f85`) is an ancestor of the branch. The author created a Git-ignored root `.env` holding `META_MUSE_API_KEY`. Nothing in the code loaded it, and the key was not set in the shell, user or machine environment.
+
+**Done (committed in the second session as `c0a0fd8` and `eb79c45`):**
+- **`.env` loader:** `muse_client.load_api_key_from_dotenv`, standard library only.
+  - It reads `META_MUSE_API_KEY` alone, never overrides a key already set, and never prints it.
+  - Only `muse_probes record` calls it; `evaluate` and `sweep` never read `.env`.
+  - Target workers still have the key removed from their environment.
+  - An existing test now points at a missing file, so it can never read the real `.env`.
+- **Live pilot (one call):** `muse-spark-1.3`, response `resp_6ae5b0b5ee523841844848fd`, saved 09:11:16 UTC (14:41 +0530).
+  - Usage: 473 input and 2,873 output tokens (2,729 reasoning).
+  - **Cost estimate** at the standard-mode prices recorded on 2026-10-28, assuming reasoning is billed as output: about $0.013. Not checked against an invoice.
+  - Seven amounts proposed, $2,000.36–$2,000.53, including both computed edges. None of them appears in the prompt.
+- **Offline replay, primary configuration** (`evaluate`): C 12/15 and D 14/15, 0/8 false accusations. Identical to A and B, because only one target has a response.
+- **`sweep`:** methods A–D at the same budgets and the same ten seeds, with the correct targets as controls, the origin of every probe amount, and a reproducibility fingerprint.
+  - `load_trials` now refuses inconsistent input records, duplicates and non-object files.
+  - `benchmark.run` gained `sweep_seeds()` and an opt-in `keep_report`. Primary-run report hashes match the earlier B run made on this branch (`results-v2-B-harness`), except the wall-clock case.
+- **Sweep result on `narrow-computed-range`:**
+  - A and B: 0/10 at budget 250 and 1/10 at 1000, 2000 and 8000 (default seed only). This reproduces the earlier claim.
+  - C and D: 10/10 at every budget from 250 up, all exactly located.
+  - 0/800 false accusations in the control runs; 0 spurious claims.
+  - Two full runs were identical (1,000 of 1,000 report hashes). The evidence file's hash was unchanged.
+
+**Validation:** 419 tests OK locally (27 in `test_muse_probes`). `benchmark.run --skip-sweep` on this branch, started 09:24:48 UTC: 14/15 detection, 0/8 false accusations, 0/613 spurious claims, 27/27 verdicts, 39,523 search calls, the same as B. Only `time-limit-exhausted` differed between its two passes, as before. No CI run yet for these changes.
+
+**Limits stated in BENCHMARK.md:**
+- One target and one trial.
+- The target and the prompt were written by us.
+- A constant-folding extension of B has not been measured as a control.
+- The corpus-level metrics are unchanged.
+
+**Next decision (the author's):**
+1. Review and commit these changes on the branch (not merged).
+2. Decide whether to make more live calls. The cheapest informative step is 2 more trials on `narrow_computed_range`, to measure whether Muse repeats the edges. The full 63 calls are about $0.80 if each call's usage matches the pilot (an estimate).
+3. Optionally, measure a deterministic constant-folding control before claiming that a model is needed for computed edges.
+4. Update DEMO_STORYBOARD.md only with recorded behaviour.
+
+## 2026-10-31 (second session): deterministic control E against Muse
+
+**Start state (verified):** branch `feat/muse-probe-experiment` = its remote = `472257c`, with the first session's 7 files uncommitted. `master` = `origin/master` = `ba916b8`. The B branch (`3b90f85`) is an ancestor. The saved live response's SHA-256 is `0f3ecfd3…f74f`. **No API call was made this session.**
+
+**Reproduced first:** the A–D sweep re-run from the frozen evidence, before any E code was written.
+- Same fingerprint (`b78c87b5…5a35`) and 1,000 of 1,000 identical report hashes.
+- 800 control runs with 0 false accusations.
+- C and D: 40 search-enabled target runs each, 0 of 160 claims spurious. The earlier "0/160" counted claims, not runs; BENCHMARK.md now says so.
+
+**Done:**
+- **Method E**, `src/policyproof/constant_folding.py`: a bounded AST evaluator that folds constant expressions in the target's source to probe amounts, with provenance for each amount. It never runs target code; unsupported expressions are reported.
+  - Wired as `verify(constant_probes=False)` by default. With the flag off, reports are byte-identical.
+  - Added `benchmark.run --constant-probes`, and methods E (B + folding) and F (E + Muse) in `muse_probes sweep`.
+  - 31 new tests in `tests/test_constant_folding.py`, plus updated sweep tests.
+- **Sweep A–F** (offline replay of the live evidence):
+  - E finds `narrow-computed-range` in 10/10 seeds at every budget from 250 up, all exactly located, the same as C.
+  - C vs E and F vs E: no seed differs.
+  - 0/1,200 false accusations in the control runs.
+  - Reproducible: 1,500 of 1,500 identical report hashes.
+- **Corpus-wide E** (`benchmark.run --constant-probes`, started 11:10:21 UTC): 14/15 detection, 0/8 false accusations, 0/613 spurious claims, 27/27 verdicts. Sweep 120/120 exactly located at every budget from 250 up, against B's 110/111/111/111.
+- **Default B re-run** (started 11:12:06 UTC): identical to before, except `time-limit-exhausted`.
+- **Found:** `examples/buggy_engine.py` has a UTF-8 BOM that B's literal reader cannot parse. It has no effect on results, and B was not changed.
+
+**Conclusion:** on corpus v2, Muse's proposals add no measured value beyond deterministic constant folding. The live call shows that Muse read the code correctly, not that it is needed.
+
+**Validation:** 453 tests OK locally. `c0a0fd8` alone passes in a clean worktree (426 OK, 2 skipped: the git-ignored live replay).
+
+**Live calls:** not made; they need the author's authorization. Two more trials on `narrow_computed_range` would measure only Muse's consistency on a target where E already reaches the ceiling. They cannot show incremental value.
+
+**Next decision (the author's):**
+1. Review E and the documentation.
+2. If Muse's value is to be tested, first add targets that E cannot fold (corpus v3, committed before any measurement), then make live calls on those.
+3. Decide how the demo presents Muse: as a proposer whose output PolicyProof checks, not as the source of a detection that E does not also make.
+
+**Commit identity (2026-10-31):** GitHub declined the push because the commits carried the author's private email. With the author's approval, the three unpushed commits were rebuilt on their identical trees with the account's noreply address, keeping messages, order and author dates. The new hashes are `c0a0fd8` (was `b60b386`), `eb79c45` (was `9f8ee66`) and `cf2eebc` (was `59b73da`). The originals are kept on the local branch `backup/muse-probe-experiment-59b73da`. `472257c` and everything earlier are unchanged.

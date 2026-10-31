@@ -41,7 +41,7 @@ import json
 import os
 import re
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -237,6 +237,41 @@ def build_prompt(policy_text: str) -> str:
     )
 
 
+def load_api_key_from_dotenv(
+    path: Path, environ: MutableMapping[str, str] | None = None
+) -> bool:
+    """Copy ``META_MUSE_API_KEY`` from a dotenv file into ``environ``.
+
+    Only that one key is read; every other line is ignored. A key already
+    set (non-blank) in ``environ`` wins and is never overwritten. A missing
+    file is not an error. The value is never printed or logged. Returns
+    True only if the key was set from the file.
+    """
+    environ = os.environ if environ is None else environ
+    if environ.get(API_KEY_ENV, "").strip():
+        return False
+    try:
+        lines = Path(path).read_text(encoding="utf-8-sig").splitlines()
+    except FileNotFoundError:
+        return False
+    for line in lines:
+        name, sep, value = line.strip().partition("=")
+        name = name.strip()
+        if name.startswith("export "):
+            name = name[len("export "):].strip()
+        if not sep or name != API_KEY_ENV:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        else:
+            value = value.split(" #", 1)[0].strip()
+        if value:
+            environ[API_KEY_ENV] = value
+            return True
+    return False
+
+
 class MuseClient:
     def __init__(
         self,
@@ -263,6 +298,11 @@ class MuseClient:
         """Ask Muse Spark for rules and test cases, then validate them."""
         body = self._post({"model": MODEL_ID, "input": build_prompt(policy_text)})
         return proposal_from_response(body, policy_text, source=SOURCE_LIVE)
+
+    def complete(self, prompt: str) -> dict[str, Any]:
+        """Send one prompt and return the raw response body, with the same
+        error handling and key redaction as propose_rules."""
+        return self._post({"model": MODEL_ID, "input": prompt})
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         transport = self._transport or requests.post

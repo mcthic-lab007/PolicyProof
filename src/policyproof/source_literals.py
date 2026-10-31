@@ -40,46 +40,77 @@ class SourceAmounts:
 def source_amounts(function: Callable, low: Decimal, high: Decimal) -> SourceAmounts:
     """The whole-cent amounts in [low, high] written in ``function``'s source
     and in the module-level constants it refers to by name, ascending."""
-    try:
-        path = inspect.getsourcefile(function)
-        lines, first = inspect.getsourcelines(function)
-    except (TypeError, OSError) as exc:
-        return SourceAmounts((), None, f"source not available: {exc}")
-    if path is None or getattr(function, "__name__", "<lambda>") == "<lambda>":
-        return SourceAmounts((), None, "source not available: not a named function")
-    try:
-        node = ast.parse(textwrap.dedent("".join(lines)))
-        module = ast.parse(Path(path).read_text(encoding="utf-8"))
-    except (OSError, SyntaxError, UnicodeDecodeError, ValueError) as exc:
-        return SourceAmounts((), None, f"source could not be parsed: {exc}")
-
-    constants = {}
-    for statement in module.body:
-        if isinstance(statement, ast.Assign) and len(statement.targets) == 1 \
-                and isinstance(statement.targets[0], ast.Name):
-            constants[statement.targets[0].id] = statement.value
-        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name) \
-                and statement.value is not None:
-            constants[statement.target.id] = statement.value
-
-    trees, seen = [node], set()
-    names = [n.id for n in ast.walk(node) if isinstance(n, ast.Name)]
-    while names:  # module constants, and the constants they name in turn
-        name = names.pop()
-        if name in seen or name not in constants:
-            continue
-        seen.add(name)
-        trees.append(constants[name])
-        names.extend(n.id for n in ast.walk(constants[name]) if isinstance(n, ast.Name))
-
+    resolved = _resolve(function)
+    if isinstance(resolved, str):
+        return SourceAmounts((), None, resolved)
+    node, constants, where = resolved
     found = set()
-    for tree in trees:
+    for tree in [node, *constants]:
         for item in ast.walk(tree):
             amount = _amount(item)
             if amount is not None and low <= amount <= high:
                 found.add(amount)
-    where = f"{Path(path).name}:{first} {function.__name__}()"
     return SourceAmounts(tuple(sorted(found))[:MAX_SOURCE_AMOUNTS], where)
+
+
+def source_excerpt(function: Callable) -> str | None:
+    """The code source_amounts reads, regenerated from its syntax tree: the
+    module constants it names, then the function renamed to ``decide``.
+    Comments and docstrings are dropped, so the excerpt carries only what
+    the code does, not what its author wrote about it. None: no source."""
+    resolved = _resolve(function)
+    if isinstance(resolved, str):
+        return None
+    node, constants, _ = resolved
+    function_node = next(n for n in ast.walk(node) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
+    function_node.name = "decide"
+    function_node.decorator_list = []
+    for item in ast.walk(function_node):
+        body = getattr(item, "body", None)
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and body \
+                and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            item.body = body[1:] or [ast.Pass()]
+    parts = [ast.unparse(c) for c in constants] + ["", ast.unparse(function_node)]
+    return "\n".join(parts).strip() + "\n"
+
+
+def _resolve(function: Callable):
+    """(function syntax tree, module-level constant assignments it names,
+    where) or the reason the source cannot be read."""
+    try:
+        path = inspect.getsourcefile(function)
+        lines, first = inspect.getsourcelines(function)
+    except (TypeError, OSError) as exc:
+        return f"source not available: {exc}"
+    if path is None or getattr(function, "__name__", "<lambda>") == "<lambda>":
+        return "source not available: not a named function"
+    try:
+        node = ast.parse(textwrap.dedent("".join(lines)))
+        module = ast.parse(Path(path).read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError, ValueError) as exc:
+        return f"source could not be parsed: {exc}"
+
+    assignments = {}
+    for statement in module.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1 \
+                and isinstance(statement.targets[0], ast.Name):
+            assignments[statement.targets[0].id] = statement
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name) \
+                and statement.value is not None:
+            assignments[statement.target.id] = statement
+
+    used, seen = [], set()
+    names = [n.id for n in ast.walk(node) if isinstance(n, ast.Name)]
+    while names:  # module constants, and the constants they name in turn
+        name = names.pop()
+        if name in seen or name not in assignments:
+            continue
+        seen.add(name)
+        used.append(assignments[name])
+        names.extend(n.id for n in ast.walk(assignments[name].value) if isinstance(n, ast.Name))
+    used.sort(key=lambda statement: statement.lineno)  # in source order
+    return node, used, f"{Path(path).name}:{first} {function.__name__}()"
 
 
 def _amount(node: ast.AST) -> Decimal | None:

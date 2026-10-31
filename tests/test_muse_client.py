@@ -285,6 +285,55 @@ class MissingCredentialsTests(unittest.TestCase):
         self.assertNotIn(FAKE_KEY, repr(MuseClient(FAKE_KEY)))
 
 
+class DotenvTests(unittest.TestCase):
+    def load(self, text, environ=None):
+        environ = {} if environ is None else environ
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            path.write_text(text, encoding="utf-8")
+            loaded = muse_client.load_api_key_from_dotenv(path, environ)
+        return loaded, environ
+
+    def test_plain_line_sets_key(self):
+        self.assertEqual(self.load(f"{API_KEY_ENV}={FAKE_KEY}\n"),
+                         (True, {API_KEY_ENV: FAKE_KEY}))
+
+    def test_accepted_syntax_variants(self):
+        for text in [f'{API_KEY_ENV}="{FAKE_KEY}"', f"{API_KEY_ENV}='{FAKE_KEY}'",
+                     f"export {API_KEY_ENV}={FAKE_KEY}", f"  {API_KEY_ENV} = {FAKE_KEY}  ",
+                     f"{API_KEY_ENV}={FAKE_KEY} # comment", f"{API_KEY_ENV}={FAKE_KEY}\r\n",
+                     f"﻿{API_KEY_ENV}={FAKE_KEY}", f"# c\nOTHER=x\n{API_KEY_ENV}={FAKE_KEY}"]:
+            with self.subTest(text=text):
+                self.assertEqual(self.load(text)[1], {API_KEY_ENV: FAKE_KEY})
+
+    def test_only_the_muse_key_is_loaded(self):
+        _, environ = self.load(f"OTHER=1\n{API_KEY_ENV}={FAKE_KEY}\nMORE=2\n")
+        self.assertEqual(environ, {API_KEY_ENV: FAKE_KEY})
+
+    def test_existing_key_is_not_overwritten(self):
+        self.assertEqual(self.load(f"{API_KEY_ENV}=from-file", {API_KEY_ENV: FAKE_KEY}),
+                         (False, {API_KEY_ENV: FAKE_KEY}))
+
+    def test_blank_existing_key_is_replaced(self):
+        self.assertEqual(self.load(f"{API_KEY_ENV}={FAKE_KEY}", {API_KEY_ENV: " "})[1],
+                         {API_KEY_ENV: FAKE_KEY})
+
+    def test_missing_file_empty_value_or_absent_key_sets_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(muse_client.load_api_key_from_dotenv(Path(tmp) / "none", {}))
+        for text in [f"{API_KEY_ENV}=", f"{API_KEY_ENV}=''", "OTHER=1", f"#{API_KEY_ENV}=x"]:
+            with self.subTest(text=text):
+                self.assertEqual(self.load(text), (False, {}))
+
+    def test_defaults_to_process_environment(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(muse_client.os.environ, {}, clear=True):
+            path = Path(tmp) / ".env"
+            path.write_text(f"{API_KEY_ENV}={FAKE_KEY}\n", encoding="utf-8")
+            self.assertTrue(muse_client.load_api_key_from_dotenv(path))
+            self.assertEqual(muse_client.os.environ[API_KEY_ENV], FAKE_KEY)
+
+
 class HttpErrorTests(unittest.TestCase):
     def assert_api_error(self, response=None, error=None, status=None, fragment=""):
         client, _ = client_for(response, error)
