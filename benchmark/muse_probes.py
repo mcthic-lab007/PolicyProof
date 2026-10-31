@@ -38,6 +38,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from benchmark import run as bench
+from benchmark import corpus as corpus_v2, corpus_v3
 from benchmark.corpus import CASES, CORPUS_VERSION, CORRECT, DEFECT
 from src.policyproof.muse_client import (
     FIXTURE_NOTE_KEY,
@@ -57,6 +58,10 @@ from src.policyproof.source_literals import source_excerpt
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DIR = ROOT / "artifacts" / "muse_probes"
+DEFAULT_DIR_V3 = ROOT / "artifacts" / "muse_probes_v3"
+# Targets `record` asks Muse about: all corpus targets for v2; for v3 only the
+# targets new in v3, so v2 evidence is never re-recorded or mixed in.
+RECORD_CASES = CASES
 # Git-ignored; read only by the live `record` command, only for META_MUSE_API_KEY.
 DOTENV = ROOT / ".env"
 INPUT_KEY = "_policyproof_probe_input"
@@ -135,7 +140,7 @@ def parse_proposals(body: dict) -> tuple[tuple[Decimal, ...], list[str]]:
 
 def targets() -> dict[str, str]:
     """Distinct target import paths in the corpus, with a file-safe name each."""
-    specs = sorted({case.target for case in CASES})
+    specs = sorted({case.target for case in RECORD_CASES})
     return {spec: re.sub(r"[^a-z0-9]+", "-", spec.lower()).strip("-") for spec in specs}
 
 
@@ -491,25 +496,48 @@ def _importable(spec: str) -> bool:
         return False
 
 
+def use_corpus(version: str) -> None:
+    """Select the ground-truth corpus for every command (and for benchmark.run's
+    scorer, which this harness calls)."""
+    global CASES, CORPUS_VERSION, RECORD_CASES
+    if version == "3":
+        CASES, CORPUS_VERSION, RECORD_CASES = corpus_v3.CASES, corpus_v3.CORPUS_VERSION, corpus_v3.NEW_CASES
+    elif version == "2":
+        CASES, CORPUS_VERSION, RECORD_CASES = corpus_v2.CASES, corpus_v2.CORPUS_VERSION, corpus_v2.CASES
+    else:
+        raise ValueError(f"unknown corpus {version!r}")
+    bench.CASES, bench.CORPUS_VERSION = CASES, CORPUS_VERSION
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
     rec = sub.add_parser("record", help="LIVE: ask Muse Spark for probe amounts and save them")
     rec.add_argument("--trials", type=int, default=3)
-    rec.add_argument("--dir", type=Path, default=DEFAULT_DIR)
+    rec.add_argument("--dir", type=Path, default=None,
+                     help="saved responses (default: artifacts/muse_probes, or muse_probes_v3 for --corpus 3)")
+    rec.add_argument("--corpus", choices=("2", "3"), default="2")
     rec.add_argument("--target", help="record this corpus target only (a pilot), e.g. "
                      "benchmark.targets:narrow_computed_range")
     ev = sub.add_parser("evaluate", help="OFFLINE: score saved proposals on the frozen corpus")
-    ev.add_argument("--dir", type=Path, default=DEFAULT_DIR)
+    ev.add_argument("--dir", type=Path, default=None,
+                     help="saved responses (default: artifacts/muse_probes, or muse_probes_v3 for --corpus 3)")
+    ev.add_argument("--corpus", choices=("2", "3"), default="2")
     ev.add_argument("--output", type=Path, required=True)
     ev.add_argument("--allow-synthetic", action="store_true")
     sw = sub.add_parser("sweep", help="OFFLINE: methods A-F over the same budgets and seeds")
-    sw.add_argument("--dir", type=Path, default=DEFAULT_DIR)
+    sw.add_argument("--dir", type=Path, default=None,
+                     help="saved responses (default: artifacts/muse_probes, or muse_probes_v3 for --corpus 3)")
+    sw.add_argument("--corpus", choices=("2", "3"), default="2")
     sw.add_argument("--output", type=Path, required=True, help="results JSON; a .md is written beside it")
     sw.add_argument("--allow-synthetic", action="store_true")
     sw.add_argument("--seeds", type=int, default=bench.SWEEP_SEEDS)
     sw.add_argument("--budgets", default=",".join(map(str, bench.SWEEP_BUDGETS)))
     args = parser.parse_args(argv)
+    if args.corpus == "3":  # v2 is the module default; switching only for v3 keeps callers' setup
+        use_corpus("3")
+    if args.dir is None:
+        args.dir = DEFAULT_DIR_V3 if args.corpus == "3" else DEFAULT_DIR
     policy_text = bench.POLICY.read_text(encoding="utf-8")
 
     if args.command == "record":

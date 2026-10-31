@@ -412,5 +412,63 @@ class SweepTests(unittest.TestCase):
         self.assertIn("REPLAY_SYNTHETIC", text)
 
 
+
+class CorpusV3HarnessTests(unittest.TestCase):
+    """Synthetic responses only; no network. Global corpus state is restored."""
+
+    def setUp(self):
+        patches = [mock.patch.multiple(mp, CASES=mp.CASES, CORPUS_VERSION=mp.CORPUS_VERSION,
+                                       RECORD_CASES=mp.RECORD_CASES),
+                   mock.patch.multiple(bench, CASES=bench.CASES, CORPUS_VERSION=bench.CORPUS_VERSION)]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        mp.use_corpus("3")
+
+    def test_record_covers_only_the_new_v3_targets(self):
+        calls = []
+
+        def transport(url, **kwargs):
+            calls.append(kwargs["json"]["input"])
+            return FakeResponse(body_for([], note=False))
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = mp.record(MuseClient(FAKE_KEY, transport=transport), POLICY_TEXT, Path(tmp), trials=1)
+            self.assertEqual(len(saved), 8)
+            specs = {json.loads(p.read_text(encoding="utf-8"))[mp.INPUT_KEY]["target"] for p in saved}
+            self.assertTrue(all(s.startswith("benchmark.targets_v3:") for s in specs))
+            for p in saved:
+                self.assertEqual(json.loads(p.read_text(encoding="utf-8"))[mp.INPUT_KEY]["corpus_version"], "3")
+        self.assertFalse(any("8642.13" in prompt for prompt in calls))  # imported: not shown
+
+    def test_v2_evidence_is_refused_under_v3(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = "benchmark.targets_v3:loop_assembled_cent"
+            write_trial(tmp, spec, live_labelled(["1500.07"]), meta=dict(input_record(spec), corpus_version="2"))
+            with self.assertRaises(ValueError):
+                mp.load_trials(Path(tmp), allow_synthetic=True)
+
+    def test_sweep_on_v3_judges_proposals_on_the_new_targets(self):
+        from benchmark import corpus_v3
+        spec = "benchmark.targets_v3:loop_assembled_cent"
+        cases = (corpus_v3.by_id("loop-assembled-cent"), corpus_v3.by_id("correct-quantized"))
+        with mock.patch.object(mp, "CASES", cases):
+            results = mp.seed_sweep({1: {spec: body_for(["1500.07"])}}, "REPLAY_SYNTHETIC",
+                                    POLICY_TEXT, (250,), 1)
+        self.assertEqual(results["corpus_version"], "3")
+        rows = {(r["case"], r["method"]): r for r in results["trials"]["1"]["rows"]}
+        self.assertTrue(rows[("loop-assembled-cent", "C")]["detected"])
+        self.assertFalse(rows[("loop-assembled-cent", "E")]["detected"])
+        for method in "ABCDEF":
+            self.assertEqual(rows[("correct-quantized", method)]["confirmed_findings"], 0)
+
+    def test_cli_default_directory_for_v3(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(mp, "DEFAULT_DIR_V3", Path(tmp)), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            code = mp.main(["sweep", "--corpus", "3", "--output", str(Path(tmp) / "o.json")])
+        self.assertEqual(code, 1)
+        self.assertIn("no saved trials", err.getvalue())
+        self.assertIn(str(Path(tmp)), err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
