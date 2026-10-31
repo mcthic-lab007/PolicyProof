@@ -125,6 +125,7 @@ from src.policyproof.target_search import (
     SearchOutcome,
     search as search_target,
 )
+from src.policyproof.constant_folding import FoldedConstants, fold_constants
 from src.policyproof.source_literals import SourceAmounts, source_amounts
 
 
@@ -273,6 +274,7 @@ def verify(
     source_probes: bool = True,
     proposed_probes: tuple[Decimal, ...] = (),
     proposed_probes_origin: str | None = None,
+    constant_probes: bool = False,
 ) -> VerificationResult:
     """Verify a rule document against ``policy_text``. The document is
     re-validated against this policy text first, so L0 never rests on where
@@ -281,7 +283,9 @@ def verify(
     ``search_budget`` target calls; 0 disables the search. With
     ``source_probes``, amounts written in the target's own source are probed
     first (see source_literals); they are probes, never evidence by
-    themselves. Problems in the
+    themselves. With ``constant_probes``, constant expressions in the
+    target's source are also folded to amounts and probed (see
+    constant_folding); the source is parsed, never executed. Problems in the
     model's output become findings; this raises only for invalid arguments."""
     if not isinstance(policy_text, str) or not policy_text.strip():
         raise ValueError("policy_text must be a non-empty string")
@@ -333,6 +337,7 @@ def verify(
 
     outcome: SearchOutcome | None = None
     hints: SourceAmounts | None = None
+    folded: FoldedConstants | None = None
     proposed: tuple[Decimal, ...] = ()
     search_points: list[PointResult] = []
     try:
@@ -345,9 +350,12 @@ def verify(
             low, high = NUMERIC_DOMAINS["amount"]
             if source_probes:
                 hints = source_amounts(target.decide, low, high)
+            if constant_probes:
+                folded = fold_constants(target.decide, low, high)
             proposed = tuple(sorted({a for a in proposed_probes if low <= a <= high}))
             outcome = _search(engine, results, reference, run_target, search_budget, search_seed,
-                              tuple(sorted(set(hints.amounts if hints else ()) | set(proposed))))
+                              tuple(sorted(set(hints.amounts if hints else ())
+                                           | set(folded.amounts if folded else ()) | set(proposed))))
             range_findings, search_points = _range_findings(outcome, results, document, reference)
             findings += range_findings
             if outcome.unjudged:
@@ -371,7 +379,7 @@ def verify(
         points=[_point_record(result) for result in (*results, *search_points)],
         findings=[_finding_record(finding) for finding in findings],
         target_search=_search_section(outcome, target, search_budget, reference, hints,
-                                      proposed, proposed_probes_origin),
+                                      proposed, proposed_probes_origin, folded),
         target_execution=_execution_section(target, worker),
     )
     report["verification"]["result"] = verdict(findings, level, required_level)
@@ -822,7 +830,8 @@ def _execution_section(target, worker: TargetWorker | None) -> dict[str, Any]:
 
 def _search_section(outcome: SearchOutcome | None, target, budget, reference,
                     hints: SourceAmounts | None = None, proposed: tuple[Decimal, ...] = (),
-                    proposed_origin: str | None = None) -> dict[str, Any]:
+                    proposed_origin: str | None = None,
+                    folded: FoldedConstants | None = None) -> dict[str, Any]:
     if outcome is None:
         reason = "no target supplied" if target is None else "search budget is 0"
         return {"performed": False, "reason": reason}
@@ -853,6 +862,17 @@ def _search_section(outcome: SearchOutcome | None, target, budget, reference,
                     "one cent either side like source amounts. A proposal is a place to look, "
                     "not a finding: only the decisions observed there count.",
         } if proposed else {"used": False},
+        **({} if folded is None else {"constant_amounts": {
+            "read_from": folded.source,
+            "unavailable": folded.unavailable,
+            "amounts": [str(a) for a in folded.amounts],
+            "derivations": {k: list(v) for k, v in folded.derivations.items()},
+            "unsupported": list(folded.unsupported),
+            "note": "Constant expressions in the target's source folded to amounts by a bounded "
+                    "evaluator over the syntax tree (the source was parsed, never executed), "
+                    "probed with one cent either side. Unsupported expressions are listed, not "
+                    "guessed. A probe is evidence only through the decisions observed there.",
+        }}),
         "strategy": (
             "For each value of has_service_date: amounts written in the target's source and "
             "one cent either side (when enabled), then a round-number ladder (1, 2, 2.5 and 5 x 10^k "
