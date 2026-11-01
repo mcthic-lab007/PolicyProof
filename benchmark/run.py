@@ -35,7 +35,7 @@ response. Results describe this small synthetic corpus only.
 
 Usage:
     python -m benchmark.run [--output-dir DIR] [--label NAME] [--overwrite]
-        [--seeds N] [--budgets 0,250,...] [--skip-sweep] [--corpus 2|3|g1]
+        [--seeds N] [--budgets 0,250,...] [--skip-sweep] [--corpus 2|3|g1|g2]
         [--no-source-probes] [--constant-probes] [--string-probes] [--cents-probes]
 """
 
@@ -51,7 +51,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 
-from benchmark import corpus_gen, corpus_v3
+from benchmark import corpus_g2, corpus_gen, corpus_v3
 from benchmark.corpus import CASES, CORPUS_VERSION, CORRECT, DEFECT, FAILURE, Case
 from src.policyproof import reference as reference_module
 from src.policyproof.muse_client import replay_proposal
@@ -402,8 +402,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-sweep", action="store_true")
     parser.add_argument("--no-source-probes", action="store_true",
                         help="do not probe amounts written in the targets' source")
-    parser.add_argument("--corpus", choices=("2", "3", "g1"), default="2",
-                        help="ground-truth corpus: 2 (default), 3 (adds cases E cannot fold) or g1 (G/H generalization)")
+    parser.add_argument("--corpus", choices=("2", "3", "g1", "g2"), default="2",
+                        help="ground-truth corpus: 2 (default), 3 (adds cases E cannot fold) g1 or g2 (G/H generalization)")
     parser.add_argument("--constant-probes", action="store_true",
                         help="also probe constant expressions folded from the targets' source (method E)")
     parser.add_argument("--string-probes", action="store_true",
@@ -423,6 +423,8 @@ def main(argv: list[str] | None = None) -> int:
         CASES, CORPUS_VERSION = corpus_v3.CASES, corpus_v3.CORPUS_VERSION
     elif args.corpus == "g1":
         CASES, CORPUS_VERSION = corpus_gen.CASES, corpus_gen.CORPUS_VERSION
+    elif args.corpus == "g2":
+        CASES, CORPUS_VERSION = corpus_g2.CASES, corpus_g2.CORPUS_VERSION
     SOURCE_PROBES = not args.no_source_probes
     CONSTANT_PROBES = args.constant_probes
     STRING_PROBES = args.string_probes

@@ -602,6 +602,88 @@ Both primary passes were identical in every configuration. Search calls ranged f
 - **The capped call:** the incomplete `imported_constant_cent` call shows the 6,000-token cap can cut off a long reasoning trace. Without a cap that call would have cost more, and it was not retried.
 - **Artifacts and replay check:** `artifacts/benchmark/muse-v3-sweep.json` (fingerprint `ff17fde175a88027`), `muse-v3-evaluate.json` and `muse-v3-analysis.txt`. A second sweep from the same files is in `muse-v3-sweep-repeat.json`.
 
+## Method H correction and corpus g2: pre-registration (committed before any g2 measurement)
+
+### The correction (`c4a0694`, development, not validation)
+
+**Root cause:** H marked every node of a `Decimal(100)` factor, including its `ast.Load` context object. Python shares one `Load` instance across all names, even across separately parsed trees. Once that object was marked, every loaded name looked like "the amount × 100", so a table compared with or looked up by it was never read.
+- **Affected forms:** `Decimal(100)`, `Decimal("100")`, `Decimal("100.00")`, `decimal.Decimal(100)`, and the same factor through a local variable (development probe, before and after).
+- **Unaffected:** a bare `100` or `100.0`, which is a constant with no context node.
+- **Not limited to one function:** the shared object made names in module constants look scaled too.
+
+**Approaches compared:**
+
+| Approach | Fixes the failure | Scope | Complexity and runtime | False-probe risk | Explainability |
+|---|---|---|---|---|---|
+| A. Narrowly recognise `Decimal(100)` forms | No: they were already recognised; the defect is the marking, not the recognition | Same as before | Trivial | Unchanged | Good |
+| B. Restricted static evaluator for factor expressions (`10 ** 2`, aliases, named constants) with provenance | Yes, plus more spellings | Broader | More code to maintain | Higher: more expressions become scale evidence | Harder |
+| C. Decline cents inference whenever the factor is a call or the unit is ambiguous | Avoids the symptom by giving up `Decimal` scaling | Narrower | Trivial | Lowest | Good |
+| **Chosen: root-cause fix plus C's abstentions** | Yes | Same spellings as documented | One filter (`expr_context` nodes are never marked) and two decline rules | Lower than before: percentages and contradicted names no longer probe | Every abstention is recorded with its reason |
+
+**Abstentions added** (requirements of this task; each is recorded in the report's `cents_amounts.declined`):
+- **ratio:** a division takes part in the scaled expression. `amount / limit * 100` and `amount * 100 / limit` are percentages; before, H read `250` there as $2.50.
+- **contradicted:** a name meaning cents is compared directly with the dollar amount, as in `case.amount <= LIMIT_CENTS`. The code uses it as dollars, so the name is not evidence. Scale evidence, being explicit, still wins over a misleading name.
+
+**Still not handled:** aliases (`D = Decimal`), `10 ** 2`, a named constant holding 100, tuple unpacking, helper functions, imported names, and other scale factors.
+
+**Development tests:** `tests/test_h_correction.py` (9 tests) plus the updated percentage test in `tests/test_literal_heuristics.py`. The suite has 507 tests, all OK. These are regression tests, not generalization evidence.
+
+**Corpus g1 is not used to validate this correction.** The g1 miss on `special-set-scaled` is what revealed the defect. A g1 re-run with the corrected H is reported separately below as a post-hoc diagnostic.
+
+### Corpus g2 (frozen at the commit that adds this section)
+
+**Frozen files (git blob / SHA-256 of the LF text):**
+
+| File | Blob | SHA-256 |
+|---|---|---|
+| `benchmark/targets_g2.py` | `9516f8571ec8ca395c736c7d6a082fc50760d612` | `a8ff7a9b5a6d6471c445c836ae97e250108b2730126e4e1866f076903dae4a87` |
+| `benchmark/targets_g2_config.py` | `5562861c80b6cbf1c67fb876a95ffa6fc8c35d1f` | `ab8f79492bcd656f8b7743c10c0046bbec4812c0fdae790bb0c8ccbae152739e` |
+| `benchmark/corpus_g2.py` | `d3b2b60ab571e00e4b18a3c945568dae771bd37d` | `6180a1f644cd59ae4f89b781e2b6c9bc8523c24ad561cd4f9b18734f5da4efde` |
+
+**Ground-truth hash:** `e087e38799a67714bddce567f13c4e3729a5890a174a927bd2f24e0007357605`. This is the SHA-256 of the sorted JSON list of (id, group, expected exit, intervals).
+
+**Ground truth:** worked out from each mechanism, then checked by scanning every whole cent from $0.00 to $20,000.00, dated and undated, against the policy. All 16 intervals matched and all 8 controls had no discrepancy. `tests/test_benchmark_g2.py` re-checks the edges, seeded samples and ±$50 windows.
+
+**No g2 measurement had been made when this was committed.** No `results-g2-*` file existed and no method had been run on a g2 target. The only runs were the ground-truth scan, which calls the targets themselves, and the static form probe in the development tests, which uses separate fixtures.
+
+**Design (24 targets, none copied or mutated from g1):**
+
+| Role | Count | Cases |
+|---|---|---|
+| H corrected (Decimal-scaled cents) | 6 | refund set via `Decimal("100")`; dict `.get` via `decimal.Decimal(100)`; literal minor-unit range; quantized set of `Decimal` members; camelCase locals; constant named *dollars* used as cents |
+| H either (plain 100) | 2 | cents constant with `round(amount * 100)`; literal pair with `round(100 * amount)` |
+| G positive | 2 | YAML-like text; bracketed `range[a..b]` spec |
+| Abstain | 6 | imported cents; conversion inside a helper; basis points; `Decimal` imported as `Dec`; an amount computed from character codes; a cents-named constant compared with dollars (B's job, not H's) |
+| Control (correct) | 8 | correct percentage; correct `Decimal` cents limit; merchant ids; version and build; unrelated `Decimal(100)` tax arithmetic; cents watchlist not used in the decision; *cents* name holding dollars; guest count and a date |
+
+**Disclosure:** the same author wrote the correction and g2, after the correction, knowing H's scope. The predictions below include every expected miss. Two of the six "H corrected" cases are predicted to be found by the **old** H too, because the bug spares bare literals and name evidence.
+
+**Predictions (primary detection of 16 defects):** A 0, B 1, E 1, A+G 2, A+H_old 4, **A+H 8**, A+G+H 10, B+G+H 11, E+G+H_old 7, **E+G+H 11**. Per-case predictions are in `corpus_g2.PREDICTIONS`.
+
+**Configurations (same budgets and seeds as every other corpus):**
+- Primary runs: budget 2000, seed 20261104, two isolated passes.
+- Sweep: budgets 0/250/1000/2000/8000 × the same 10 seeds.
+- On g2: A, B, E, A+G, A+H, A+G+H, B+G+H and E+G+H with the corrected H.
+- **Ablation H_old:** A+H and E+G+H with H as of `018b5ee`. They run in a temporary git worktree of the freeze commit, with only `literal_heuristics.py` and `verification.py` taken from `018b5ee`.
+- **Controls:** the 8 g2 controls at every sweep budget and seed, per configuration.
+- **On v3:** A, B and E, plus E+G+H with the corrected H.
+
+**Acceptance criteria (all must hold; none is changed after measurement):**
+
+| # | Criterion | Why this threshold |
+|---|---|---|
+| 1 | On the 6 "H corrected" cases, corrected A+H detects and exactly locates at least 5, and at least 3 more than A+H_old | The correction's target set allows one unforeseen miss. The +3 margin shows the gain comes from the correction, not from other code, given 2 predicted old finds |
+| 2 | Corrected A+H detects both "H either" cases | No regression on what H already did |
+| 3 | Corrected H returns no cents amount on the 6 abstain cases, records a `contradicted` decline on `cents-name-dollar-defect`, and A+H detects none of them | H must not claim success outside its scope |
+| 4 | 0 false accusations on the 8 controls in every configuration, primary and control sweep | A false accusation is the costliest error for a verifier |
+| 5 | 0 spurious claims everywhere | No finding without target and reference evidence |
+| 6 | v3 A, B and E reproduce `f57880153f5fd944`, `86899a835639bd70` and `69800ca1bf6e8899`; v3 E+G+H with the corrected H reproduces `0f552a446fe55616` | The correction must not change unrelated methods, nor H where it was right |
+| 7 | Both primary passes identical for every g2 case in every configuration | g2 has no wall-clock case |
+| 8 | The three g2 files are byte-identical before and after, and the ground-truth hash is unchanged | Frozen means frozen |
+| 9 | A+H primary search calls within 1% of A's; A+H primary seconds at most 1.5× A's; at most 4 cents amounts on any control | Probes come out of the same budget; parse-only analysis should be cheap; a bound on probe growth from misleading numbers |
+
+**Post-hoc diagnostics (not criteria, not validation):** A+H and E+G+H with the corrected H on corpus g1, whose files and results are left unchanged.
+
 ## What the evidence says
 
 1. **No false accusations and no spurious claims** (0/7 cases, 0/598 claims). When PolicyProof says "confirmed", the ground truth agreed every time in this corpus. The model-only, contradicting-expectation and conflicting-reference scenarios were correctly *not* confirmed.
