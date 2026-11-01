@@ -294,13 +294,17 @@ class SweepTests(unittest.TestCase):
     def test_all_methods_run_with_the_right_probe_origins(self):
         results = self.sweep(EDGES)
         target = self.rows(results, case="narrow-computed-range")
-        self.assertEqual(sorted({r["method"] for r in target}), ["A", "B", "C", "D", "E", "F"])
+        self.assertEqual(sorted({r["method"] for r in target}), ["A", "B", "C", "D", "E", "EGH", "EGHM", "F"])
         for r in target:
             m = r["method"]
-            uses_source, uses_constants, uses_muse = m in "BDEF", m in "EF", m in "CDF"
+            uses_source = m in {"B", "D", "E", "F", "EGH", "EGHM"}
+            uses_constants = m in {"E", "F", "EGH", "EGHM"}
+            uses_muse = m in {"C", "D", "F", "EGHM"}
             self.assertEqual(bool(r["probes"]["source"]), uses_source, m)
             self.assertEqual("2000.37" in r["probes"]["constant"], uses_constants, m)
             self.assertEqual(r["probes"]["muse"], EDGES if uses_muse else [], m)
+            if m not in {"EGH", "EGHM"}:  # G and H only in the EGH methods
+                self.assertEqual((r["probes"]["string"], r["probes"]["cents"]), ([], []), m)
         for row in results["trials"]["1"]["summary"]:
             self.assertEqual(row["seeds"], 2)
 
@@ -468,6 +472,131 @@ class CorpusV3HarnessTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("no saved trials", err.getvalue())
         self.assertIn(str(Path(tmp)), err.getvalue())
+
+    def test_sweep_on_v3_scores_against_e_plus_g_plus_h(self):
+        from benchmark import corpus_v3
+        spec = "benchmark.targets_v3:loop_assembled_cent"
+        cases = (corpus_v3.by_id("loop-assembled-cent"), corpus_v3.by_id("correct-config-string"))
+        with mock.patch.object(mp, "CASES", cases):
+            results = mp.seed_sweep({1: {spec: body_for(["1500.07"])}}, "REPLAY_SYNTHETIC",
+                                    POLICY_TEXT, (250,), 1)
+        rows = {(r["case"], r["method"]): r for r in results["trials"]["1"]["rows"]}
+        self.assertFalse(rows[("loop-assembled-cent", "EGH")]["detected"])
+        self.assertTrue(rows[("loop-assembled-cent", "EGHM")]["detected"])
+        self.assertEqual(rows[("correct-config-string", "EGH")]["probes"]["string"], ["40.00"])
+        self.assertEqual(rows[("correct-config-string", "EGHM")]["confirmed_findings"], 0)
+        unique = results["trials"]["1"]["unique_candidates"][0]
+        self.assertEqual(unique["muse_not_in_egh"], ["1500.07"])
+        self.assertIn("1500.07", unique["muse_points_not_in_egh"])
+
+
+def usage_body(cap_echo, output=2900, input_tokens=500, usage=True):
+    body = body_for(["1500.07"], note=False)
+    body.update(id="resp_fake", model=mp.MODEL_ID, max_output_tokens=cap_echo)
+    body["usage"] = ({"input_tokens": input_tokens, "input_tokens_details": {"cached_tokens": 0},
+                      "output_tokens": output, "output_tokens_details": {"reasoning_tokens": output - 100}}
+                     if usage else None)
+    return body
+
+
+class CostGuardTests(unittest.TestCase):
+    """The budget guard of the live record command; fake transport only."""
+
+    def setUp(self):
+        CorpusV3HarnessTests.setUp(self)
+
+    def record(self, respond, budget="0.10"):
+        sent = []
+
+        def transport(url, **kwargs):
+            sent.append(dict(kwargs["json"]))
+            return respond(kwargs["json"])
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        client = MuseClient(FAKE_KEY, transport=transport)
+        try:
+            saved, stopped = mp.record(client, POLICY_TEXT, Path(tmp.name), 1,
+                                       budget_usd=D(budget) if budget else None), None
+        except mp.BudgetStop as exc:
+            saved, stopped = exc.saved, str(exc)
+        ledger_path = Path(tmp.name) / mp.LEDGER
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else None
+        return sent, saved, stopped, ledger
+
+    def test_cost_arithmetic(self):
+        usage = {"input_tokens": 1000, "input_tokens_details": {"cached_tokens": 200}, "output_tokens": 2000}
+        self.assertEqual(mp.call_cost(usage), (800 * D("1.25") + 200 * D("0.15") + 2000 * D("4.25")) / 1_000_000)
+        self.assertEqual(mp.output_cap(D(0), D("0.10"), "ab" * 10, 6000), 6000)
+        self.assertEqual(mp.output_cap(D("0.099"), D("0.10"), "", 6000), 235)
+        self.assertEqual(mp.output_cap(D("0.20"), D("0.10"), "", 6000), 0)
+
+    def test_pilot_sized_calls_stop_before_the_budget_and_in_priority_order(self):
+        sent, saved, stopped, ledger = self.record(lambda payload: FakeResponse(
+            usage_body(payload["max_output_tokens"])))
+        # 7 calls of about $0.0130 leave too little for a 3,000-token cap.
+        self.assertEqual(len(sent), 7)
+        self.assertEqual(len(saved), 7)
+        self.assertIn("below the 3000 minimum", stopped)
+        targets = [json.loads(p.read_text(encoding="utf-8"))[mp.INPUT_KEY]["target"] for p in saved]
+        self.assertEqual(targets, list(mp.V3_ORDER[:7]))
+        self.assertTrue(all(p["max_output_tokens"] <= 6000 for p in sent))
+        self.assertEqual(sent[0]["max_output_tokens"], 6000)
+        total = sum(D(c["cost_usd"]) for c in ledger["calls"])
+        self.assertLessEqual(total, D("0.10"))
+        self.assertEqual(ledger["calls"][-1]["cumulative_usd"], str(total))
+        self.assertEqual(ledger["budget_usd"], "0.10")
+        self.assertNotIn(FAKE_KEY, json.dumps(ledger))
+
+    def test_a_cap_the_api_does_not_echo_stops_after_one_call(self):
+        sent, saved, stopped, _ = self.record(lambda payload: FakeResponse(usage_body(None)))
+        self.assertEqual((len(sent), len(saved)), (1, 1))
+        self.assertIn("cannot be relied on", stopped)
+
+    def test_missing_usage_stops_after_one_call(self):
+        sent, _, stopped, ledger = self.record(lambda payload: FakeResponse(
+            usage_body(payload["max_output_tokens"], usage=False)))
+        self.assertEqual(len(sent), 1)
+        self.assertIn("spend cannot be tracked", stopped)
+        self.assertEqual(ledger["calls"][0]["outcome"], "usage missing")
+
+    def test_output_beyond_the_cap_stops(self):
+        sent, _, stopped, _ = self.record(lambda payload: FakeResponse(
+            usage_body(payload["max_output_tokens"], output=payload["max_output_tokens"] + 1)))
+        self.assertEqual(len(sent), 1)
+        self.assertIn("exceed the cap", stopped)
+
+    def test_an_api_error_is_logged_and_never_retried(self):
+        class Refused(FakeResponse):
+            status_code = 400
+            text = "bad request"
+        sent = []
+        with tempfile.TemporaryDirectory() as tmp:
+            def transport(url, **kwargs):
+                sent.append(1)
+                return Refused({"error": {"message": "unsupported parameter"}})
+            with self.assertRaises(mp.MuseClientError):
+                mp.record(MuseClient(FAKE_KEY, transport=transport), POLICY_TEXT, Path(tmp), 1,
+                          budget_usd=D("0.10"))
+            ledger = json.loads((Path(tmp) / mp.LEDGER).read_text(encoding="utf-8"))
+        self.assertEqual(len(sent), 1)
+        self.assertTrue(ledger["calls"][0]["outcome"].startswith("API error"))
+
+    def test_past_spend_in_the_ledger_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / mp.LEDGER).write_text(json.dumps({"budget_usd": "0.10", "calls": [
+                {"cost_usd": "0.0990"}]}), encoding="utf-8")
+            sent = []
+            with self.assertRaises(mp.BudgetStop):
+                mp.record(MuseClient(FAKE_KEY, transport=lambda url, **k: sent.append(1)), POLICY_TEXT,
+                          Path(tmp), 1, budget_usd=D("0.10"))
+        self.assertEqual(sent, [])
+
+    def test_no_cap_is_sent_without_a_budget(self):
+        sent, saved, stopped, ledger = self.record(lambda payload: FakeResponse(usage_body(None)), budget=None)
+        self.assertEqual(len(sent), 8)
+        self.assertTrue(all("max_output_tokens" not in p for p in sent))
+        self.assertIsNone(stopped)
+        self.assertIsNone(ledger)
 
 
 if __name__ == "__main__":
