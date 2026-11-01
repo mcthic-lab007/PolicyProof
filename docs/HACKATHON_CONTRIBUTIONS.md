@@ -61,6 +61,8 @@ What was built for the Meta Global AI Developer Hackathon (2026-10-26 to 2026-11
 | 21 | Benchmark corpus v3 (frozen before measurement) | `a027049` (10-31) | Eight cases whose special amounts E cannot fold (run-time rounding, loop, config string, cents table, lambda helper, imported constant); literal ground truth, realism labels and per-method predictions committed and pushed before any method was run | `tests/test_benchmark_v3.py`; A/B/E measured in [BENCHMARK.md](BENCHMARK.md) |
 | 22 | Muse probe harness for corpus v3 (**no live call yet**) | `1296edc` (10-31) | `--corpus 3` for record, evaluate and sweep; v3 evidence kept separate from v2 | `tests/test_muse_probes.py` (synthetic only) |
 | 25 | Probe heuristics G (numbers inside strings) and H (integers as cents, evidence-gated) | `7ac132c` (11-01, code and predictions); results documented in the next commit | Parse-only, each switchable and off by default; H reads an integer as cents only when the code compares it with, or looks it up by, the amount x 100, or names it cents; predictions committed and pushed before measurement | `tests/test_literal_heuristics.py` (20 tests); v3 detection E 15/21 → E+G+H 17/21, 0/10 false accusations ([BENCHMARK.md](BENCHMARK.md)) |
+| 26 | Generalization corpus g1 for G and H (frozen before measurement) | `07e44d4` (11-01); renderer fix `f85d221`; results `bcc4c3c` | 23 unseen targets: G and H positives, out-of-scope defects, misleading-number controls; exhaustive ground-truth scan; seven acceptance criteria pushed before measurement | `tests/test_benchmark_gen.py`; all criteria pass (A+G+H 9/15 vs A 1/15, 0 false accusations); one H bug found and documented, not fixed ([BENCHMARK.md](BENCHMARK.md)) |
+| 27 | Muse harness cost guard and E+G+H scoring | `018b5ee` (11-01), before any call | Per-call `max_output_tokens` from the remaining budget, ledger, stop rules, no retry; v3 call order; methods EGH and EGHM | `tests/test_muse_probes.py` (fake transport); used for the six live calls below |
 
 Merge commits (`9dcfe54`, `5cc0f07`, `129433b`, `b2f75b9`, `7918fcb`, `7921aa3`, `e48006d`, `451e83b`, `2dee2a6`, `9a3adb1`, `ba916b8`, `c01da1b`, `68118fe`; the full list from `git log --merges master`) integrate the feature branches above and add no code of their own.
 
@@ -78,6 +80,13 @@ Merge commits (`9dcfe54`, `5cc0f07`, `129433b`, `b2f75b9`, `7918fcb`, `7921aa3`,
   - Saved, git-ignored, as `artifacts/muse_probes/benchmark-targets-narrow-computed-range/trial-1.json`, with the exact prompt and its SHA-256.
   - Muse proposed the computed edges $2,000.37 and $2,000.52, among seven amounts. Their evaluation is an offline replay labelled `REPLAY_SAVED_LIVE_RESPONSE`.
   - PolicyProof's deterministic constant folding (row 19) finds the same edges without a model, so Muse added no measured value beyond it on this corpus ([BENCHMARK.md](BENCHMARK.md)).
+- **v3 probe experiment (six live calls, 2026-11-01, 13:19:49–13:20:57 UTC):** `record --corpus 3 --trials 1`, authorized for up to eight calls with an estimated ceiling of about $0.10, after corpus g1 passed.
+  - Responses: `resp_6ae73c75261e9d5dd2ef4fbd`, `resp_6ae73c850ffb802a50e14920`, `resp_6ae73c9b3e231cc83d62493e` (incomplete: output cap), `resp_6ae73ca765f153802e3d4b3e`, `resp_6ae73cb09a41e7ddb3774076` and `resp_6ae73cb9900612e4424a4bc9`. All are `muse-spark-1.3` with `store: true`.
+  - Cost: estimated at $0.08976 from usage and the recorded prices. The budget guard stopped before the last two calls, which were not made.
+  - Saved, git-ignored, under `artifacts/muse_probes_v3/` with prompts, usage and a cost ledger. Scored offline as `REPLAY_SAVED_LIVE_RESPONSE`.
+  - Muse proposed the one-cent loop amount $1,500.07 and the rounding-window edges $2,007.49 and $2,008.57, which E+G+H does not generate. PolicyProof confirmed both defects by running the target and the reference: v3 detection went from 17/21 to 19/21, with 0/10 false accusations.
+  - These rest on one response per target.
+- **Live call count on this branch's record:** eight. One on 10-27, one probe pilot on 10-31, and these six. A further live call, `muse_live_002` on 10-31, is documented on `feat/live-demo-evidence`, so the total is nine.
 - **Offline evidence:** the committed fixture is hand-written and labelled `REPLAY_SYNTHETIC`. It is not Muse output. The benchmark and offline demo use it so that anyone can reproduce them.
 
 ## Third-party dependencies and services

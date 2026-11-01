@@ -306,3 +306,33 @@ No log was kept that day; this entry is reconstructed from the commit history on
 **Next decision (the author's):**
 1. Review; then decide whether to authorize the eight-call v3 Muse run (about $0.10 estimated), scored against E+G+H.
 2. Merging `feat/benchmark-v3` and `feat/live-demo-evidence` (expect small conflicts in DAILY_LOG, HACKATHON_CONTRIBUTIONS and README).
+
+## 2026-11-01 (later): generalization gate for G and H, then six live Muse calls on v3
+
+**Start state (verified):** `feat/benchmark-v3` = its remote = `563f6c1`, clean. G and H unchanged since `7ac132c`. `master` = `68118fe`, untouched. **Authorized:** a G/H generalization test, then up to eight live Muse calls on v3 (estimated about $0.10) only if it passed. No merges.
+
+**Done:**
+- **`07e44d4`, corpus g1:** 23 unseen targets (5 G positives, 5 H positives, 5 out of scope, 8 controls).
+  - Ground truth was checked by scanning every cent from $0 to $20,000.
+  - Predictions and seven acceptance criteria were pushed at 16:09 IST, before measurement.
+- **`f85d221`:** the first g1 run crashed in `render()` (it named the v2 case `exclusive-boundary`) before writing any result. Renderer fixed; JSON now saved first.
+- **Measured 10:58–11:10 UTC.** All seven criteria pass (`bcc4c3c`):
+  - A+G+H 9/15 against A 1/15.
+  - G 5/5 and H 3/5, H exactly at the bar.
+  - 0 false accusations, including a 2,400-run control sweep; 0 spurious claims.
+  - The v3 A/B/E fingerprints were reproduced.
+  - Three predictions failed and are explained: sampling luck, a corpus design error (`rule-after-long-text` never tested the cap), and a **real H bug** (a `Decimal(100)` factor marks the shared `ast.Load` node, so every loaded name looks scaled). H is not fixed, to avoid tuning against g1.
+- **`018b5ee`:** cost guard in the harness (per-call `max_output_tokens` from the remaining budget, ledger, stop rules, no retry), the v3 call order, and EGH/EGHM scoring. CI passed before the first call.
+- **LIVE, 13:19:49–13:20:57 UTC:** six calls, about $0.0898 estimated.
+  - One response (`imported_constant_cent`) was incomplete at the 6,000-token cap.
+  - The guard stopped before the last two calls, both correct targets, so they were not made.
+  - Evidence is in `artifacts/muse_probes_v3/`, backed up with verified hashes.
+- **Offline replay:** E+G+H 17/21 → E+G+H+Muse 19/21. `loop-assembled-cent` ($1,500.07) and `converted-rounding-window` (edges $2,007.49 / $2,008.57) are each exactly located in 10/10 seeds at every budget from 250 up. 0 false accusations in 300 control runs per method. A repeated sweep gave the same fingerprint `ff17fde175a88027`.
+
+**Conclusion:** the first measured case where Muse adds verified value beyond the strongest deterministic baseline: two defects, one response each. Model repeatability is unmeasured.
+
+**Next decision (the author's):**
+1. Whether to authorize the two remaining calls (correct targets, about $0.02) and repeat trials on the two winning targets, to measure repeatability.
+2. Fix the H bug, then test it on a new unseen corpus.
+3. Review and merge both feature branches.
+4. Decide whether the loop-cent replay becomes the demo's Muse beat.

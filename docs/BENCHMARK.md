@@ -541,6 +541,67 @@ Both primary passes were identical in every configuration. Search calls ranged f
 - 23 synthetic targets are not real code.
 - One G case turned out to be invalid as a test of the cap.
 
+## Muse Spark on corpus v3: six live calls, scored against E+G+H
+
+**Authorization and gate:** the author authorized up to eight live calls with an estimated ceiling of about $0.10, conditional on corpus g1 passing. g1 passed all seven criteria (`bcc4c3c`). The harness with the cost guard, `018b5ee`, was committed and pushed before the first call, and CI passed on it.
+
+**Calls (LIVE):** `python -m benchmark.muse_probes record --corpus 3 --trials 1`, 2026-11-01, 13:19:49–13:20:57 UTC (API `created_at`). Same prompt as the v2 pilot, one call per target, in the pre-registered order, with no retry.
+
+| # | Target | Response id | Status | Input | Output (reasoning) | Cap | Est. cost | Proposals |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `loop_assembled_cent` | `resp_6ae73c75261e9d5dd2ef4fbd` | completed | 452 | 2,017 (1,939) | 6,000 | $0.00914 | 1500.06, **1500.07**, 1500.08 |
+| 2 | `converted_rounding_window` | `resp_6ae73c850ffb802a50e14920` | completed | 458 | 5,011 (4,834) | 6,000 | $0.02187 | 39.99–40.01, 2007.48, **2007.49**, 2007.50, 2008.03, **2008.57**, 2008.58 |
+| 3 | `imported_constant_cent` | `resp_6ae73c9b3e231cc83d62493e` | **incomplete** (max_output_tokens) | 413 | 6,000 (5,998) | 6,000 | $0.02602 | none (unusable) |
+| 4 | `helper_computed_range` | `resp_6ae73ca765f153802e3d4b3e` | completed | 455 | 2,940 (2,462) | 6,000 | $0.01306 | 2500.12–2500.34 (every cent) |
+| 5 | `encoded_string_range` | `resp_6ae73cb09a41e7ddb3774076` | completed | 457 (355 cached) | 2,274 (2,073) | 6,000 | $0.00985 | 39.99–40.01, 7531.23–7531.25, 7531.50, 7531.88–7531.90 |
+| 6 | `integer_cents_table` | `resp_6ae73cb9900612e4424a4bc9` | completed | 431 | 2,186 (2,070) | 4,447 | $0.00983 | 39.99–40.01, 6543.20–6543.22 |
+
+- **Model and stopping:** every response reports `model: muse-spark-1.3` and `store: true`. The API echoed every cap.
+- **Spend:** $0.08976 estimated in total. That is usage × the recorded prices of $1.25/M input, $0.15/M cached and $4.25/M output, with reasoning billed as output. It is not an invoice.
+- **Calls not made:** the guard stopped before call 7, `correct_quantized`, because only 2,130 output tokens were affordable, below the 3,000 minimum. Calls 7 and 8 were **not made**; both targets are correct ones. Making them needs new approval.
+- **Evidence location:** git-ignored, under `artifacts/muse_probes_v3/` (six responses plus `cost-ledger.json`). A copy with verified SHA-256 hashes is in the author's local backup folder.
+
+**Scoring (offline replay, `REPLAY_SAVED_LIVE_RESPONSE`):** the `sweep` and `evaluate` commands use the same budgets and seeds as every other method. Controls are the 10 correct v3 cases, each probed with all of Muse's proposals pooled. The evidence digests were unchanged after every run.
+
+| Primary (budget 2000, seed 20261104) | Detection | Exact | False accusations | Spurious claims | Verdicts | Missed |
+|---|---|---|---|---|---|---|
+| E+G+H, no model (`results-v3h-EGH`) | 17/21 | 17/21 | 0/10 | 0 | 32/35 | hangs-at-40, converted-rounding-window, loop-assembled-cent, imported-constant-cent |
+| Muse alone: C = A + Muse | 17/21 | 17/21 | 0/10 | 0 | 32/35 | single-cent-777.77, narrow-literal-range, hangs-at-40, imported-constant-cent |
+| **E+G+H + Muse (EGHM)** | **19/21** | **19/21** | 0/10 | 0 | **34/35** | hangs-at-40, imported-constant-cent |
+
+**Sweep, Muse targets:** five cases × 10 seeds per budget; the incomplete response gave no target.
+
+| Budget | EGH exact | EGHM exact | C exact | Controls accused (any method) |
+|---|---|---|---|---|
+| 250 / 1000 | 30/50 | 50/50 | 50/50 | 0/60 |
+| 2000 | 31/50 | 50/50 | 50/50 | 0/60 |
+| 8000 | 33/50 | 50/50 | 50/50 | 0/60 |
+
+**Per case, exact seeds at budgets 250/1000/2000/8000:**
+- `loop-assembled-cent`: EGH 0/0/0/0 → EGHM 10/10/10/10.
+- `converted-rounding-window`: EGH 0/0/1/3 (sampling) → EGHM 10/10/10/10.
+- `encoded-string-range`, `integer-cents-table` and `helper-computed-range`: 10/10 with and without Muse, so Muse gets no credit for them.
+- Across all methods, budgets and seeds: 0 false accusations in 300 control runs per method, and 0 spurious claims.
+
+**What Muse contributed:** points E+G+H did not generate that were independently confirmed as discrepancies.
+- `loop-assembled-cent`: **1500.07**, the only defective cent.
+- `converted-rounding-window`: **2007.49** and **2008.57**, the exact edges, plus 2008.03 inside the window. Their neighbours 2007.48 and 2008.58 confirm the edges from outside.
+- In both cases the finding comes from the target's and the reference's actual decisions; the proposal only chose where to look.
+
+**Incremental contribution beyond E+G+H:** **2 defects** (17 → 19 of 21), each exactly located in 10/10 seeds at every budget from 250 up, with no false accusation and no spurious claim. This is the first measured case in this project where Muse adds verified value beyond the strongest deterministic baseline.
+
+**Prediction record** (`corpus_v3.PREDICTIONS`, `a027049`):
+- **Loop and rounding window:** "possible: the sum is visible in the excerpt" and "possible: needs 1849.5 / 0.9213 and 1850.5 / 0.9213 from the code". Both happened.
+- **`imported-constant-cent`:** predicted "miss: the excerpt shows one module only". It was a miss: the response hit the output cap while reasoning, so there were no proposals at all.
+
+**Limits (read before citing these numbers):**
+- **One response per target.** Whether Muse repeats these proposals is unmeasured; the v2 pilot was also a single response. The 10 seeds vary the deterministic search, not the model.
+- **Two cases are not a rate.** The six calls are one small, correlated experiment with the same prompt, the same author and synthetic targets. `loop-assembled-cent` is labelled an artificial fixture; `converted-rounding-window` a realistic mechanism.
+- **Muse beat the current deterministic baseline, not every possible one.** A sum-over-generator evaluator, or solving `round(x × 0.9213) = 1850` for x, could be written deterministically. Doing that now, after seeing which cases Muse found, would repeat the post-hoc design that G and H already disclose.
+- **Controls:** the two correct targets were not shown to Muse. False-accusation control rests on the 10 correct v3 cases probed with every proposal Muse made, at every budget and seed.
+- **The capped call:** the incomplete `imported_constant_cent` call shows the 6,000-token cap can cut off a long reasoning trace. Without a cap that call would have cost more, and it was not retried.
+- **Artifacts and replay check:** `artifacts/benchmark/muse-v3-sweep.json` (fingerprint `ff17fde175a88027`), `muse-v3-evaluate.json` and `muse-v3-analysis.txt`. A second sweep from the same files is in `muse-v3-sweep-repeat.json`.
+
 ## What the evidence says
 
 1. **No false accusations and no spurious claims** (0/7 cases, 0/598 claims). When PolicyProof says "confirmed", the ground truth agreed every time in this corpus. The model-only, contradicting-expectation and conflicting-reference scenarios were correctly *not* confirmed.
@@ -560,5 +621,5 @@ Both primary passes were identical in every configuration. Search calls ranged f
 ## Ranked next improvements (from this evidence)
 
 1. ~~Bound discrepancies seen at evaluated points.~~ Done in `b434796`; see above.
-2. ~~Close the narrow-defect gap for literal amounts.~~ Done with source-amount probes (B, `cbcad53`); see above. Narrow defects at computed amounts (1 of 10 seeds with B) are closed by method E (10 of 10, deterministic). One live Muse Spark response found the same edges, but added nothing beyond E (see experiment C and method E above). Corpus v3 (frozen at `a027049`) supplied defects E cannot fold. Two of them have cheap deterministic fixes, G and H (`7ac132c`), which find them in 10/10 seeds with no false accusation, so the fair deterministic baseline on v3 is E+G+H, 17/21. **Still open:** `loop-assembled-cent` and `converted-rounding-window`, which need arithmetic over a loop or an inverted rounding condition. Whether Muse helps there needs the authorized v3 live calls, scored against E+G+H.
+2. ~~Close the narrow-defect gap for literal amounts.~~ Done with source-amount probes (B, `cbcad53`); see above. Narrow defects at computed amounts (1 of 10 seeds with B) are closed by method E (10 of 10, deterministic). One live Muse Spark response found the same edges, but added nothing beyond E (see experiment C and method E above). Corpus v3 (frozen at `a027049`) supplied defects E cannot fold. Two of them have cheap deterministic fixes, G and H (`7ac132c`), which find them in 10/10 seeds with no false accusation, so the fair deterministic baseline on v3 is E+G+H, 17/21. G and H generalize on an unseen corpus, g1 (`bcc4c3c`; G 5/5, H 3/5 with one H bug found). Six live Muse Spark calls on v3 (2026-11-01) then closed `loop-assembled-cent` and `converted-rounding-window`, which no deterministic method here finds: E+G+H 17/21 → E+G+H+Muse 19/21, with no false accusation. That is one response per target, so model repeatability is still unmeasured. **Still open:** `hangs-at-40` and `imported-constant-cent`.
 3. ~~Stop counting timeouts as wrong answers.~~ Done in `3def8c0` (corpus v2); see above.
