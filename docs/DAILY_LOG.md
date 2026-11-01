@@ -281,3 +281,28 @@ No log was kept that day; this entry is reconstructed from the commit history on
 1. Authorize `record --corpus 3 --trials 1`: 8 calls, about $0.10 estimated.
 2. Before crediting Muse, measure the two cheap deterministic heuristics: numbers inside strings, and integers read as cents.
 3. Review and merge `feat/benchmark-v3`.
+
+## 2026-11-01: deterministic heuristics G and H on corpus v3
+
+**Start state (verified):** `feat/benchmark-v3` = its remote = `c540446`, clean. `master` = `origin/master` = `68118fe`. Corpus v3 frozen at `a027049`: pushed 23:17:27 +0530 on 2026-10-31, measured from 23:20:15. **No API call was made.** The eight-call v3 Muse run and every merge remain unauthorized.
+
+**Done:**
+- **`7ac132c`**: methods G (numbers inside string literals) and H (integers read as cents, only with evidence in the code), in `src/policyproof/literal_heuristics.py`.
+  - Each is independently switchable and off by default.
+  - Wired into `verify()` and `benchmark.run` (`--string-probes`, `--cents-probes`).
+  - 20 tests in `tests/test_literal_heuristics.py`; 482 tests OK.
+  - The predictions for 11 configurations went into BENCHMARK.md in the same commit, pushed before any measurement, with the disclosure that G and H were designed after v3 was measured.
+  - While writing the tests, two defects were found and fixed before the commit: the length cap could cut a number in half, and a leading-zero fragment (`000.00`) was read.
+- **Measurement**, 05:38-06:00 UTC, 11 configurations on corpus v3: two primary passes and the full sweep each, at the same budgets and seeds. Every prediction held.
+  - Detection: E 15/21 → E+G+H 17/21. Verdicts 30/35 → 32/35.
+  - The two target cases are exactly located in 10/10 seeds at every budget from 250 up.
+  - 0/10 false accusations and 0 spurious claims everywhere. No other case changed any scored field with B on.
+  - A, B and E reproduce the saved `a027049` score fingerprints exactly.
+  - One unpredicted report-hash change, `import-fails` under B and E, was traced to the harness stub moving from `run.py:87` to `run.py:88`. It is explained and harmless.
+- BENCHMARK.md results and limits; README; HACKATHON_CONTRIBUTIONS row 25. Rows 23-24 are on `feat/live-demo-evidence`, which also has the BOM fix `de5519b`, not on this branch: here the three buggy-engine cases still skip source probes, as in the saved baselines.
+
+**Conclusion:** two of the four v3 defects missed by A, B and E fall to cheap deterministic code, so a Muse win there would prove nothing. The fair baseline for Muse on v3 is E+G+H (17/21). The remaining tests of model value are `loop-assembled-cent` and `converted-rounding-window`; `imported-constant-cent` is a control.
+
+**Next decision (the author's):**
+1. Review; then decide whether to authorize the eight-call v3 Muse run (about $0.10 estimated), scored against E+G+H.
+2. Merging `feat/benchmark-v3` and `feat/live-demo-evidence` (expect small conflicts in DAILY_LOG, HACKATHON_CONTRIBUTIONS and README).

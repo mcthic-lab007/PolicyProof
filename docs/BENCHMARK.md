@@ -367,6 +367,58 @@ Two parse-only probe heuristics, each with its own switch and off by default (`s
 - **False accusations:** 0/10 and 0 spurious claims in every configuration. A probe is only a place to look, so neither heuristic can create a finding by itself.
 - **Verdicts (of 35):** each new detection turns a false-negative exit 0 into 3. B+G+H 31, E+G+H 32.
 
+## Methods G and H on corpus v3: results
+
+**Measured on `7ac132c` (clean tree), pushed with the predictions above before any run.**
+- Eleven configurations ran between 05:38 and 06:00 UTC on 2026-11-01. Each had two primary passes plus the full sweep (budgets 0/250/1000/2000/8000, the same ten seeds as every earlier run).
+- `benchmark.run --corpus 3 --label v3h-<config>`, written to `artifacts/benchmark/results-v3h-*.json` (git-ignored).
+- **Fingerprint:** SHA-256 of the canonical primary and sweep scores, with the wall-clock fields removed (`seconds`, `worker`, `report_sha256`, `unjudged_search_evaluations`); first 16 hex characters.
+
+| Config | Detection | Exact location | False accusations | Spurious claims | Verdicts | Search calls | Sweep exactly located (250 / 1000 / 2000 / 8000, of 180) | Fingerprint |
+|---|---|---|---|---|---|---|---|---|
+| A | 12/21 | 12/21 | 0/10 | 0/605 | 27/35 | 51,546 | 90 / 91 / 92 / 94 | `f57880153f5fd944` |
+| A+G | 15/21 | 15/21 | 0/10 | 0/617 | 30/35 | 51,523 | 120 / 121 / 122 / 124 | `048ac99ccdd26628` |
+| A+H | 13/21 | 13/21 | 0/10 | 0/609 | 28/35 | 51,546 | 100 / 101 / 102 / 104 | `9d5531c9c90e3734` |
+| B | 14/21 | 14/21 | 0/10 | 0/613 | 29/35 | 51,523 | 110 / 111 / 112 / 114 | `86899a835639bd70` |
+| B+G | 15/21 | 15/21 | 0/10 | 0/617 | 30/35 | 51,523 | 120 / 121 / 122 / 124 | `048ac99ccdd26628` |
+| B+H | 15/21 | 15/21 | 0/10 | 0/617 | 30/35 | 51,523 | 120 / 121 / 122 / 124 | `43896351de4c51cb` |
+| B+G+H | 16/21 | 16/21 | 0/10 | 0/621 | 31/35 | 51,523 | 130 / 131 / 132 / 134 | `62e7d49a84e69bf8` |
+| E | 15/21 | 15/21 | 0/10 | 0/617 | 30/35 | 51,519 | 130 / 130 / 131 / 133 | `69800ca1bf6e8899` |
+| E+G | 16/21 | 16/21 | 0/10 | 0/621 | 31/35 | 51,519 | 140 / 140 / 141 / 143 | `db95deacc379dd33` |
+| E+H | 16/21 | 16/21 | 0/10 | 0/621 | 31/35 | 51,519 | 140 / 140 / 141 / 143 | `343826200d059722` |
+| E+G+H | 17/21 | 17/21 | 0/10 | 0/625 | 32/35 | 51,519 | 150 / 150 / 151 / 153 | `0f552a446fe55616` |
+
+At budget 0 (search disabled) every configuration locates the same 20 intervals.
+
+**Against the predictions: every one held.**
+- **Detection, exact location and verdicts:** exactly as predicted for every configuration.
+- **The two target cases:** `encoded-string-range` (G) and `integer-cents-table` (H) are exactly located in 10/10 seeds at every budget from 250 up, and 0/10 at budget 0.
+- **Nothing else moved:** with B on, no other case changed any scored field, in the primary runs or the sweep. 0/10 false accusations and 0 spurious claims everywhere, including the correct controls `correct-config-string` and `integer-cents`, where G and H do add probes.
+- **A+G = B+G:** the two have identical scores (same fingerprint). On this corpus every amount B contributes is written as a string (`Decimal("777.77")`), which G also reads. Against A alone, G therefore also gains `single-cent-777.77` and `narrow-literal-range`, and changes the probe calls of `off-by-one-cent` and `approves-from-900k` exactly as B does. In general G does not replace B: G never reads int or float literals.
+- **Still missed by every configuration:** `hangs-at-40`, `loop-assembled-cent`, `imported-constant-cent`, and `converted-rounding-window` (sampling only: 0/0/1/3 seeds at 250/1000/2000/8000, unchanged).
+
+**Compatibility with the saved `a027049` runs:**
+- With G and H off, A, B and E reproduce the saved score fingerprints exactly, and the sweeps are identical.
+- Report hashes: A 34/35, B 34/35, E 33/35.
+  - `time-limit-exhausted` is the known wall-clock case. It also differed between the two passes of some runs here (B, A+H, B+G+H, E+G), as in every earlier v3 run.
+  - `import-fails` (B and E only) is **not** a prediction we made, and it is explained. The harness replaces that unimportable target with a stub, `unavailable()`, defined in `benchmark/run.py`. B and E parse the stub's source and record where they read it. `7ac132c` added a line to the harness docstring, so the stub moved from `run.py:87` to `run.py:88`. The report records `read_from: "run.py:88 unavailable()"` with no amounts, and every scored field is identical.
+  - Reading the stub is a pre-existing quirk of the harness, harmless because the stub contains no amounts.
+
+**Cost:**
+- **Search calls:** per configuration family they are identical to the family without G and H. The probes come out of the same budget.
+- **Runtime:** the primary passes took 18–22 s here, against about 30 s for the saved runs. That reflects machine load, not the code, so the two sessions' runtimes are not comparable. Within this session, configurations with G or H were no slower than A, B or E.
+- **Repeatability:** report hashes were identical across the two primary passes for every case except `time-limit-exhausted`, in every configuration.
+
+**What this shows, and what it does not:**
+- Two of the four v3 defects that A, B and E missed are found by about 260 lines of deterministic, parse-only code, at no measured cost. A Muse Spark win on `encoded-string-range` or `integer-cents-table` would therefore show nothing beyond G and H. The fair baseline for any Muse result on v3 is now **E+G+H (17/21)**.
+- **The cases where a model could still add value are now clearer:**
+  - `loop-assembled-cent` needs `sum()` over a generator;
+  - `converted-rounding-window` needs an inverted rounding condition;
+  - `imported-constant-cent` needs another module, and the excerpt shown to Muse does not include it, so it is a control.
+- **By construction:** G and H were designed knowing these two cases, so their 10/10 is not a generalization result. Generalization needs new targets, written and frozen before G and H are run on them.
+- **Limits of G:** dates, version-like and identifier-like numbers either produce harmless extra probes or are rejected by design. Numbers with three or more decimals, other currencies' formats, and numbers split across concatenated strings are not read.
+- **Limits of H:** no inter-procedural data flow, only the factor 100 (no mills or basis points), and other modules are not followed. A percentage computed as `amount / limit * 100` and compared with an integer counts as scale evidence; a test records this. A wrong reading costs three probe calls, never a finding.
+
 ## What the evidence says
 
 1. **No false accusations and no spurious claims** (0/7 cases, 0/598 claims). When PolicyProof says "confirmed", the ground truth agreed every time in this corpus. The model-only, contradicting-expectation and conflicting-reference scenarios were correctly *not* confirmed.
@@ -386,5 +438,5 @@ Two parse-only probe heuristics, each with its own switch and off by default (`s
 ## Ranked next improvements (from this evidence)
 
 1. ~~Bound discrepancies seen at evaluated points.~~ Done in `b434796`; see above.
-2. ~~Close the narrow-defect gap for literal amounts.~~ Done with source-amount probes (B, `cbcad53`); see above. Narrow defects at computed amounts (1 of 10 seeds with B) are closed by method E (10 of 10, deterministic). One live Muse Spark response found the same edges, but added nothing beyond E (see experiment C and method E above). **Still open:** defects whose edges E cannot fold. Whether Muse helps there needs new targets in a new corpus version, committed before measurement, and live calls.
+2. ~~Close the narrow-defect gap for literal amounts.~~ Done with source-amount probes (B, `cbcad53`); see above. Narrow defects at computed amounts (1 of 10 seeds with B) are closed by method E (10 of 10, deterministic). One live Muse Spark response found the same edges, but added nothing beyond E (see experiment C and method E above). Corpus v3 (frozen at `a027049`) supplied defects E cannot fold. Two of them have cheap deterministic fixes, G and H (`7ac132c`), which find them in 10/10 seeds with no false accusation, so the fair deterministic baseline on v3 is E+G+H, 17/21. **Still open:** `loop-assembled-cent` and `converted-rounding-window`, which need arithmetic over a loop or an inverted rounding condition. Whether Muse helps there needs the authorized v3 live calls, scored against E+G+H.
 3. ~~Stop counting timeouts as wrong answers.~~ Done in `3def8c0` (corpus v2); see above.
