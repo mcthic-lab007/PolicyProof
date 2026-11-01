@@ -54,6 +54,68 @@ class SourceAmountTests(unittest.TestCase):
         self.assertEqual(len(source_amounts(_many, LOW, HIGH).amounts), MAX_SOURCE_AMOUNTS)
 
 
+_MODULE_SOURCE = '''from decimal import Decimal
+
+OVERRIDE = Decimal("777.77")
+
+
+def decide(case):
+    if case.amount == OVERRIDE:
+        return "REJECT"
+    return "APPROVE" if case.amount <= 40 else "REJECT"
+'''
+
+
+class SourceEncodingTests(unittest.TestCase):
+    """Regression: a target file starting with a UTF-8 byte-order mark (as
+    examples/buggy_engine.py does) is valid Python, but was reported as
+    "source could not be parsed: invalid non-printable character U+FEFF",
+    so no source amount was probed."""
+
+    def load(self, directory, name, data: bytes):
+        import importlib.util, os
+        path = os.path.join(directory, f"{name}.py")
+        with open(path, "wb") as handle:
+            handle.write(data)
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module, path
+
+    def test_with_and_without_bom_give_the_same_amounts(self):
+        import tempfile
+        from src.policyproof.source_literals import source_excerpt
+        with tempfile.TemporaryDirectory() as tmp:
+            plain, _ = self.load(tmp, "pp_plain_target", _MODULE_SOURCE.encode("utf-8"))
+            bom, _ = self.load(tmp, "pp_bom_target", b"\xef\xbb\xbf" + _MODULE_SOURCE.encode("utf-8"))
+            for module in (plain, bom):
+                with self.subTest(module=module.__name__):
+                    result = source_amounts(module.decide, LOW, HIGH)
+                    self.assertIsNone(result.unavailable)
+                    self.assertEqual([str(a) for a in result.amounts], ["40.00", "777.77"])
+                    self.assertIn("OVERRIDE = Decimal('777.77')", source_excerpt(module.decide))
+
+    def test_the_bom_demo_engine_is_parsed(self):
+        from examples import buggy_engine
+        with open(buggy_engine.__file__, "rb") as handle:
+            self.assertEqual(handle.read(3), b"\xef\xbb\xbf")  # the case this guards
+        result = source_amounts(buggy_engine.evaluate_meal_claim, LOW, HIGH)
+        self.assertIsNone(result.unavailable)
+        self.assertIn(D("40.00"), result.amounts)
+
+    def test_malformed_source_is_still_reported(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            module, path = self.load(tmp, "pp_malformed_target", b"\xef\xbb\xbf" + _MODULE_SOURCE.encode("utf-8"))
+            with open(path, "ab") as handle:  # the file no longer parses; the loaded function is intact
+                handle.write(b"\ndef broken(:\n")
+            result = source_amounts(module.decide, LOW, HIGH)
+        self.assertEqual(result.amounts, ())
+        self.assertIsNone(result.source)
+        self.assertTrue(result.unavailable.startswith("source could not be parsed:"))
+        self.assertNotIn("U+FEFF", result.unavailable)
+
+
 def implementation(function):
     from src.policyproof.verification import Implementation
     return Implementation(function.__name__, "", function)
