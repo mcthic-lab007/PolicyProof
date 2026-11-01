@@ -89,6 +89,27 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(seen, [("g1", c.id) for c in corpus_gen.CASES] * 2)
         self.assertEqual(bench.CORPUS_VERSION, "2")
 
+    def test_render_without_the_v2_reference_case(self):
+        # Regression: render() named exclusive-boundary, absent from g1, and
+        # crashed before any result was written.
+        import contextlib
+        import io
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        two = (corpus_gen.CASES[0], corpus_gen.CASES[-1])  # one defect, one control
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(corpus_gen, "CASES", two), \
+                mock.patch.object(bench, "CASES", bench.CASES), \
+                mock.patch.object(bench, "CORPUS_VERSION", bench.CORPUS_VERSION), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(bench.main(["--output-dir", tmp, "--corpus", "g1", "--budgets", "0,250",
+                                         "--seeds", "1"]), 0)
+            text = (Path(tmp) / "results-run.md").read_text(encoding="utf-8")
+            data = json.loads((Path(tmp) / "results-run.json").read_text(encoding="utf-8"))
+        self.assertIn("mean search calls (json-config-band)", text)
+        self.assertEqual([r["case"] for r in data["primary"]], ["json-config-band", "retired-band-mentioned"])
+
 
 if __name__ == "__main__":
     unittest.main()

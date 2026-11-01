@@ -382,9 +382,12 @@ def render(results: dict) -> str:
             totals.append(f"{sum(x['intervals_found'] for x in rs)}/{sum(x['intervals_exact'] for x in rs)}"
                           f" of {sum(x['intervals_total'] for x in rs)}")
         lines.append("| **all** | " + " | ".join(totals) + " |")
+        # exclusive-boundary in corpora v2 and v3; the first defect case elsewhere (g1).
+        cases = [x["case"] for x in results["sweep"]]
+        shown = "exclusive-boundary" if "exclusive-boundary" in cases else cases[0]
         calls = [str(next(x["mean_search_calls"] for x in results["sweep"] if x["budget"] == b
-                          and x["case"] == "exclusive-boundary")) for b in budgets]
-        lines.append("| mean search calls (exclusive-boundary) | " + " | ".join(calls) + " |")
+                          and x["case"] == shown)) for b in budgets]
+        lines.append(f"| mean search calls ({shown}) | " + " | ".join(calls) + " |")
         lines.append(f"Spurious claims across the sweep: {sum(x['spurious_claims'] for x in results['sweep'])}")
     return "\n".join(lines) + "\n"
 
@@ -437,10 +440,10 @@ def main(argv: list[str] | None = None) -> int:
         budgets = [int(b) for b in args.budgets.split(",")]
         results["sweep"] = sweep(policy_text, budgets, args.seeds)
 
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")  # before rendering
     text = render(results)
     print(text, end="")
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
     md_path.write_text(text, encoding="utf-8")
     print(f"\nWrote {json_path} and {md_path}")
     return 0
