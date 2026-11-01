@@ -487,6 +487,60 @@ At budget 0 (search disabled) every configuration locates the same 20 intervals.
   - `imported-constant-cent` is a control: a confirmed find there would need an explanation, since the value is not visible to Muse.
   - Eight calls on eight related targets are one small experiment, not eight independent trials.
 
+## Generalization corpus g1: results (measured at `f85d221`)
+
+**Run:** 2026-11-01, 10:58–11:10 UTC, on a clean tree at `f85d221`, with the corpus files byte-identical to the blobs recorded above.
+- The first attempt at `07e44d4` crashed in `render()` before writing any result, because it named the v2 case `exclusive-boundary`. No score was produced. `f85d221` fixed only the renderer and saves the JSON before rendering.
+- Artifacts (git-ignored): `artifacts/benchmark/results-g1-{A,AG,AH,AGH,BGH,EGH}.json`, `results-v3s-{A,B,E}.json`, `g1-controls-sweep.json` and `g1-gate-analysis.txt`.
+
+| Config | Detection (15) | Exact | False accusations (8) | Spurious claims | Verdicts (23) | Sweep exact, budgets 250/1000/2000/8000 (of 150) | Fingerprint |
+|---|---|---|---|---|---|---|---|
+| A | 1 | 1 | 0 | 0 | 9 | 0 / 0 / 1 / 7 | `8900e1a9312e9997` |
+| A+G | 6 | 6 | 0 | 0 | 14 | 60 / 60 / 60 / 63 | `fa26825c18fcae96` |
+| A+H | 4 | 4 | 0 | 0 | 12 | 30 / 30 / 31 / 37 | `9f80760f90dbc3d2` |
+| A+G+H | 9 | 9 | 0 | 0 | 17 | 90 / 90 / 90 / 93 | `9240f0d38988799c` |
+| B+G+H | 9 | 9 | 0 | 0 | 17 | 90 / 90 / 90 / 93 | `9240f0d38988799c` |
+| E+G+H | 9 | 9 | 0 | 0 | 17 | 90 / 90 / 90 / 93 | `9240f0d38988799c` |
+
+Both primary passes were identical in every configuration. Search calls ranged from 34,500 to 34,517 per configuration, and primary passes took 8.4–8.8 s.
+
+**Per case (primary):**
+- **G positives:** A+G found all 5, each in 10/10 seeds at every budget from 250 up. A found `query-string-band` once, by sampling a 56-cent band at the primary seed; in the sweep it hit 0/0/1/4 seeds.
+- **H positives:** A+H found 3 of 5: `waiver-cents-named`, `penny-dict-get` and `ceiling-cents-converted`, each in 10/10 seeds. It missed two:
+  - `cents-band-unpacked` was a predicted miss (tuple target).
+  - `special-set-scaled` was predicted as a find, so this miss was a surprise. It is a **bug in H**, explained below.
+- **Out of scope:** all five were missed except `rule-after-long-text`, which A+G found in 10/10 seeds. That find was not predicted, and it is a **corpus design error**: `"#" * 12_000 + " approve:..."` is an expression, so the rule is its own short literal, and the case never tested the length cap. It stays as frozen.
+- **Controls:** no accusation anywhere.
+  - Primary: 6 configurations × 2 passes.
+  - Sweep: 400 runs per configuration (8 controls × 5 budgets × 10 seeds), with 0 accusations, 0 spurious claims and 0 wrong exit codes.
+  - G and H did produce probes on the controls (for example 7781.25, 6100.00 and 6200.10, and H's 1.00 from the percentage). None became a finding.
+
+**Prediction record:** total A+G+H detection was 9, as predicted. Three per-case predictions were wrong: A on `query-string-band` (sampling luck), H on `special-set-scaled` (bug), and G on `rule-after-long-text` (design error). They offset, so 9 = 9 is partly a coincidence.
+
+**The H bug:** when the ×100 factor is written as a call, `Decimal(100)`, H marks every node inside it, including Python's single shared `ast.Load` context object. Every loaded name then looks "already scaled", so the lookup table `_SPECIAL` is never read as cents.
+- The v3 cases and the unit tests used a bare `100`, or compared with a literal directly, so they never triggered it.
+- Its effect is fewer readings, or extra probes when a scaled comparison also holds a bare integer. It can never produce a finding.
+- **It is not fixed here.** Fixing H after seeing this corpus and re-measuring on it would be tuning; the fix needs a new unseen corpus.
+
+**Acceptance criteria:**
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | G: at least 3 of the 5 G positives that A misses; H: at least 3 of 5 | **Pass.** G: 4 of the 4 that A misses (5/5 overall). H: 3 of 5, exactly at the threshold |
+| 2 | A+G+H beats A; sweep at least as good from 250 up, and better at 2000 | **Pass.** 9 vs 1; 90/90/90/93 vs 0/0/1/7 |
+| 3 | 0 false accusations, primary and sweep | **Pass.** 0 of 8 primary; 0 of 400 sweep runs per configuration |
+| 4 | 0 unsupported confirmed findings | **Pass.** 0 spurious claims in primary, sweep and control sweep |
+| 5 | A, B and E reproduce the v3 fingerprints | **Pass.** `f57880153f5fd944`, `86899a835639bd70` and `69800ca1bf6e8899` are all equal |
+| 6 | Reproducible | **Pass.** All g1 cases identical across passes; on v3 only `time-limit-exhausted` differed |
+| 7 | Frozen files unchanged | **Pass.** Both blobs are identical after measurement |
+
+**Gate: passed.** G generalizes to every string layout it claims to read. H works on 3 of 5 new cents representations, exactly at the bar, and the corpus exposed one real H bug.
+
+**What this does not show:**
+- The same author wrote the heuristics and the corpus.
+- 23 synthetic targets are not real code.
+- One G case turned out to be invalid as a test of the cap.
+
 ## What the evidence says
 
 1. **No false accusations and no spurious claims** (0/7 cases, 0/598 claims). When PolicyProof says "confirmed", the ground truth agreed every time in this corpus. The model-only, contradicting-expectation and conflicting-reference scenarios were correctly *not* confirmed.
