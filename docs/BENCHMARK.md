@@ -419,6 +419,74 @@ At budget 0 (search disabled) every configuration locates the same 20 intervals.
 - **Limits of G:** dates, version-like and identifier-like numbers either produce harmless extra probes or are rejected by design. Numbers with three or more decimals, other currencies' formats, and numbers split across concatenated strings are not read.
 - **Limits of H:** no inter-procedural data flow, only the factor 100 (no mills or basis points), and other modules are not followed. A percentage computed as `amount / limit * 100` and compared with an integer counts as scale evidence; a test records this. A wrong reading costs three probe calls, never a finding.
 
+## Generalization corpus g1 for G and H: pre-registration (committed before measurement)
+
+**Why:** the v3 result for G and H (17/21 with E) proves nothing about generalization, because both heuristics were designed after seeing the two v3 cases they find. Corpus g1 asks whether they work on code they have never seen.
+
+**Frozen inputs:**
+- Targets: `benchmark/targets_gen.py`, git blob `a5bb1c80804d9edc668d34ac754622a4fe7889e4`.
+- Ground truth, roles, predictions and acceptance criteria: `benchmark/corpus_gen.py`, git blob `26c6ae560733878ec6d6d4b9dcbcae1243cecc14`.
+- G and H are frozen at `7ac132c`; `src/policyproof/literal_heuristics.py` is not changed for or after this corpus.
+- Budgets and seeds are `benchmark.run`'s defaults: primary budget 2000, seed 20261104, two isolated passes; sweep budgets 0/250/1000/2000/8000 with the same 10 seeds.
+- Scoring is `benchmark.run.score`, unchanged.
+
+**Corpus (23 targets, all new):**
+
+| Role | Count | Cases |
+|---|---|---|
+| G positive | 5 | JSON config, URL query string, CSV rows, rule language, thousands separators |
+| H positive | 5 | cents name plus scale, scale only via `Decimal(100)`, cents band unpacked into locals, dict `.get` by cents, camelCase cents name converted back |
+| Out of scope | 5 | mills (×1000), zero-padded string, rule after 12,000 characters, European format, value derived from a hash (undiscoverable by any static reading) |
+| Control (correct) | 8 | version strings, identifiers and quantities, percentage of the limit, correct integer cents, names containing "cent" inside a word, dates and references, JSON limit, retired band still named in cents |
+
+**Ground truth:** worked out from each mechanism, then checked by scanning every whole cent from $0.00 to $20,000.00, dated and undated. All 15 defect intervals matched and all 8 controls had no discrepancy. `tests/test_benchmark_gen.py` re-checks edges, seeded samples and ±$50 windows.
+
+**Disclosure:** the same author wrote G, H and these targets, knowing G's and H's documented limits. The cases were written as plausible code first and predicted afterwards. The predictions include two misses that follow from those limits inside the H-positive and out-of-scope groups. A genuinely independent author would be a stronger test.
+
+**Predictions (primary detection of 15 defects):**
+
+| Config | Predicted | Why |
+|---|---|---|
+| A | 0 | every band is 1–56 cents wide and not on the ladder |
+| A+G | 5 | all five G positives |
+| A+H | 4 | four H positives; `cents-band-unpacked` is missed, because H does not follow the tuple target `lo, hi = _BAND` |
+| A+G+H | 9 | the union |
+| B+G+H | 9 | B adds nothing: every relevant amount is inside a string or written as cents |
+| E+G+H | 9 | E may fold `Decimal(promoCeilingCents) / 100`, a case H already finds |
+
+- All five out-of-scope defects are predicted to be missed by every configuration.
+- No false accusation and no spurious claim is predicted anywhere.
+- Candidate-level ("G alone", "H alone"): whether a heuristic's candidate points (each amount and one cent either side) touch the true interval is reported per case. This is computed from the reports without crediting a detection.
+
+**Acceptance criteria (all must hold; none is relaxed after measurement):**
+1. **G:** in the primary run, A+G detects and exactly locates at least 3 of the 5 G positives that A misses. **H:** likewise A+H, at least 3 of the 5 H positives.
+2. A+G+H detects more defects than A in the primary run. It locates at least as many intervals exactly as A at every sweep budget from 250 up, and strictly more at 2000.
+3. Zero false accusations on the 8 controls, in every configuration, primary and sweep.
+4. Zero unsupported confirmed findings: no spurious claim in any configuration, primary or sweep.
+5. With G and H off, A, B and E reproduce their saved corpus v3 score fingerprints (`f57880153f5fd944`, `86899a835639bd70`, `69800ca1bf6e8899`) on the new commit.
+6. Both primary passes give identical reports for every g1 case in every configuration. On corpus v3, only `time-limit-exhausted` (wall clock) may differ.
+7. Both frozen files are byte-identical before and after measurement.
+
+**Configurations measured:** A, A+G, A+H, A+G+H, B+G+H and E+G+H on g1; A, B and E (G and H off) on v3 for criterion 5.
+
+**Gate:** the eight authorized live Muse calls on corpus v3 are made only if all seven criteria hold. Otherwise no call is made.
+
+**Plan for the conditional Muse run (fixed before any call):**
+- **Calls:** `record --corpus 3 --trials 1`, one call per new v3 target (8), with no retry and no other call.
+- **Order:** most informative first: `loop_assembled_cent`, `converted_rounding_window`, `imported_constant_cent` (control: its value is not in the excerpt), `helper_computed_range`, `encoded_string_range`, `integer_cents_table`, `correct_quantized`, `correct_config_string`.
+- **Cost guard:** the approved ceiling is $0.10. Prices are those recorded on 2026-10-28: $1.25 per million input tokens, $0.15 cached input, $4.25 output, with reasoning billed as output.
+  - Before each call the harness sets `max_output_tokens` to what the remaining budget can pay for, after a conservative input bound, capped at 6,000.
+  - It makes no call if that cap is below 3,000 tokens; the only comparable call used 2,873.
+  - After each call it records usage and cost in a ledger.
+  - It stops if usage is missing, if output exceeds the cap, or if the API does not echo the cap.
+  - Any API error stops the run.
+- **Scoring:** offline sweep on v3, same budgets and seeds, with new methods EGH (E+G+H) and EGHM (EGH plus Muse proposals) alongside A–F.
+- **What counts as Muse's contribution:** a defect case where EGHM locates the interval exactly in more seeds than EGH, and where the Muse probe points that EGH does not generate fall inside that interval.
+  - Muse is not credited on any case E, G or H already finds.
+  - `loop-assembled-cent` and `converted-rounding-window` are the cases where model value is possible.
+  - `imported-constant-cent` is a control: a confirmed find there would need an explanation, since the value is not visible to Muse.
+  - Eight calls on eight related targets are one small experiment, not eight independent trials.
+
 ## What the evidence says
 
 1. **No false accusations and no spurious claims** (0/7 cases, 0/598 claims). When PolicyProof says "confirmed", the ground truth agreed every time in this corpus. The model-only, contradicting-expectation and conflicting-reference scenarios were correctly *not* confirmed.
