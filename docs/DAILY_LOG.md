@@ -336,3 +336,24 @@ No log was kept that day; this entry is reconstructed from the commit history on
 2. Fix the H bug, then test it on a new unseen corpus.
 3. Review and merge both feature branches.
 4. Decide whether the loop-cent replay becomes the demo's Muse beat.
+
+## 2026-11-01 (17:00–18:30 UTC; 2026-11-02 IST): H correction and corpus g2
+
+**Start state (verified):** `feat/benchmark-v3` = its remote = `5768b2e`, clean. Work happened on a new local branch, `feat/h-correction-g2`. **Authorized:** the H correction and g2 validation. **Not authorized:** live calls, merges or paid costs. Nothing was pushed, because this request did not authorize pushing.
+
+**Done:**
+- **Diagnosis:** marking a `Decimal(100)` factor marked Python's single shared `ast.Load` object, so every name looked scaled. This affected every `Decimal` spelling; a bare `100` was unaffected. Recorded in a before/after probe of 13 forms.
+- **`c4a0694`, the correction:** context objects are never marked. H declines, with a recorded reason, scale evidence that passes through a division (percentages) and cents names compared directly with dollars. 10 new development tests plus one rewritten (the percentage test); 507 tests OK.
+- **`3853910`, corpus g2:** 24 new targets, frozen with blob ids, SHA-256s, a ground-truth hash, predictions, an old-H ablation and nine criteria, committed at 17:50 UTC before any measurement.
+- **Measured 17:50–18:15 UTC.** All nine criteria pass:
+  - The corrected H found 6/6 Decimal-scaled cases, against 2/6 for the old H.
+  - Abstained on all 6 out-of-scope cases.
+  - 0 false accusations, including 4,000 control-sweep runs.
+  - The v3 A, B, E and E+G+H fingerprints were reproduced.
+  - Every prediction held.
+  - Post-hoc g1 (not validation): `special-set-scaled` is now found.
+
+**Next (the author's decision):**
+1. Push `feat/h-correction-g2` for CI.
+2. Merge order of the three feature branches.
+3. The two remaining Muse calls and repeat trials (unauthorized).

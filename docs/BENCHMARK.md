@@ -417,7 +417,7 @@ At budget 0 (search disabled) every configuration locates the same 20 intervals.
   - `imported-constant-cent` needs another module, and the excerpt shown to Muse does not include it, so it is a control.
 - **By construction:** G and H were designed knowing these two cases, so their 10/10 is not a generalization result. Generalization needs new targets, written and frozen before G and H are run on them.
 - **Limits of G:** dates, version-like and identifier-like numbers either produce harmless extra probes or are rejected by design. Numbers with three or more decimals, other currencies' formats, and numbers split across concatenated strings are not read.
-- **Limits of H:** no inter-procedural data flow, only the factor 100 (no mills or basis points), and other modules are not followed. A percentage computed as `amount / limit * 100` and compared with an integer counts as scale evidence; a test records this. A wrong reading costs three probe calls, never a finding.
+- **Limits of H:** no inter-procedural data flow, only the factor 100 (no mills or basis points), and other modules are not followed. A percentage computed as `amount / limit * 100` and compared with an integer counts as scale evidence; a test records this. A wrong reading costs three probe calls, never a finding. *(Superseded on 2026-11-01 by `c4a0694`: percentages are now declined. See the H correction and corpus g2 sections; this v3 text is kept as it was measured.)*
 
 ## Generalization corpus g1 for G and H: pre-registration (committed before measurement)
 
@@ -683,6 +683,72 @@ Both primary passes were identical in every configuration. Search calls ranged f
 | 9 | A+H primary search calls within 1% of A's; A+H primary seconds at most 1.5× A's; at most 4 cents amounts on any control | Probes come out of the same budget; parse-only analysis should be cheap; a bound on probe growth from misleading numbers |
 
 **Post-hoc diagnostics (not criteria, not validation):** A+H and E+G+H with the corrected H on corpus g1, whose files and results are left unchanged.
+
+## Corpus g2: results for the corrected H (measured at `3853910`)
+
+**Run:** 2026-11-01, 17:50–18:15 UTC, on a clean tree at `3853910`.
+- The old-H ablation ran in a temporary worktree of the same commit, with only `literal_heuristics.py` and `verification.py` from `018b5ee`. Its results therefore record `working_tree_dirty: true`, as planned.
+- All three g2 files and the ground-truth hash were identical after measurement.
+- **Live calls:** none.
+- **Artifacts (git-ignored):** `artifacts/benchmark/results-g2-*.json`, `results-v3c-*.json`, `results-g1c-*.json`, `g2-controls-sweep*.json`, `g2-gate-analysis.txt` and `h-forms-{before,after}.txt`.
+
+| Config | Detection (16) | Exact | False accusations (8) | Spurious claims | Verdicts (24) | Sweep exact per budget ≥250 (of 160) | Search calls | Primary s | Fingerprint |
+|---|---|---|---|---|---|---|---|---|---|
+| A | 0 | 0 | 0 | 0 | 8 | 0 | 36,000 | 8.6 | `22907e917286958f` |
+| B | 1 | 1 | 0 | 0 | 9 | 10 | 36,000 | 9.3 | `4f49027410debd78` |
+| E | 1 | 1 | 0 | 0 | 9 | 10 | 36,000 | 9.5 | `4f49027410debd78` |
+| A+G | 2 | 2 | 0 | 0 | 10 | 20 | 36,009 | 10.8 | `dc4e582cf1312f5a` |
+| A+H_old | 4 | 4 | 0 | 0 | 12 | 40 | 36,000 | 9.2 | `dcd4ed86cdff0ba8` |
+| **A+H** | **8** | **8** | 0 | 0 | **16** | **80** | 36,000 | 10.3 | `7953e6f415402954` |
+| A+G+H | 10 | 10 | 0 | 0 | 18 | 100 | 36,009 | 9.8 | `3ca1d7154a56e73b` |
+| B+G+H | 11 | 11 | 0 | 0 | 19 | 110 | 36,009 | 9.8 | `bc87ee1a4ec808c5` |
+| E+G+H_old | 7 | 7 | 0 | 0 | 15 | 70 | 36,009 | 9.2 | `89b21958bf4607ac` |
+| **E+G+H** | **11** | **11** | 0 | 0 | **19** | **110** | 36,009 | 9.8 | `bc87ee1a4ec808c5` |
+
+- **Every aggregate prediction held exactly:** 0, 1, 1, 2, 4, 8, 10, 11, 7, 11.
+- **Every per-case prediction held**, including `bracketed-range-spec`: G reads only 880.80, and bisection located the upper edge exactly.
+- **Sweep:** every detection is 10/10 seeds at every budget from 250 up; nothing is found at budget 0.
+- **Repeatability:** both primary passes were identical in every configuration.
+
+**Per case:**
+- **H corrected (6):** the corrected H found all 6, each exactly in 10/10 seeds. The old H found the 2 it was predicted to: `minor-units-window`, through bare literals, and `camel-case-promo-band`, through name evidence. It missed `refund-override-lookup`, `bonus-dict-module-decimal`, `quantized-audit-set` and `misnamed-dollars-constant`.
+- **H either (2):** both H versions found both.
+- **G (2):** found with G on.
+- **Abstain (6):** the corrected H produced no cents amount on any of them, and A+H detected none.
+  - It recorded `contradicted` on `cents-name-dollar-defect`. There B and E find the defect, by reading 9100 as $9,100.00, and the old H wasted three probes on $91.00.
+  - Imported, helper, basis points, aliased `Dec(100)` and the computed amount were missed by every configuration, as designed. These are honest misses, not claims.
+- **Controls (8):** no accusation anywhere. That covers the primary runs, and 400 control-sweep runs per configuration (8 controls × 5 budgets × 10 seeds), for both H versions: 4,000 runs with 0 accusations, 0 spurious claims and 0 wrong exit codes.
+  - The corrected H declined the percentage control (`ratio`) and the misnamed-cents control (`contradicted`). The old H probed $1.00 on the percentage control.
+  - The corrected H probed the two watchlist values ($3,333.33 and $7,777.00) and the correct $40.00 limit. None became a finding.
+
+**Acceptance criteria:**
+
+| # | Result |
+|---|---|
+| 1 | **Pass.** Corrected 6/6 against old 2/6 (+4; the bar was ≥5 and +3) |
+| 2 | **Pass.** 2/2 |
+| 3 | **Pass.** 0 amounts on all 6 abstain cases; `contradicted` recorded; A+H detected 0/6 |
+| 4 | **Pass.** 0/8 primary in all 10 configurations; 0 of 4,000 control-sweep runs |
+| 5 | **Pass.** 0 spurious claims in primary, sweep and control sweep |
+| 6 | **Pass.** v3 A, B and E give `f57880153f5fd944`, `86899a835639bd70` and `69800ca1bf6e8899`; v3 E+G+H with the corrected H gives `0f552a446fe55616`. All equal |
+| 7 | **Pass.** Every configuration is reproducible, with no nondeterministic g2 case |
+| 8 | **Pass.** Blobs and ground-truth hash unchanged |
+| 9 | **Pass.** A+H search calls equal A's (36,000, +0%); 10.3 s against 8.6 s (1.20×); at most 2 cents amounts on any control |
+
+**Correction to the pre-registration text:** it says `tests/test_h_correction.py` has 9 tests; it has 10, and the suite grew from 497 to 507. No criterion depends on this count.
+
+**Post-hoc g1 diagnostic (not validation):** with the corrected H, g1 A+H rose from 4/15 to 5/15 and E+G+H from 9/15 to 10/15. The added case is `special-set-scaled`, the case that revealed the bug. There were 0 false accusations and 0 spurious claims. `cents-band-unpacked` (tuple unpacking) is still missed, as designed. The g1 files and its recorded results are unchanged.
+
+**What g2 shows:**
+- On 24 targets the correction was not developed on, the corrected H finds Decimal-scaled cents that the old H missed (4 more) with no regression.
+- It abstains with a recorded reason where the unit is ambiguous.
+- Nothing accuses a correct program.
+
+**What g2 does not show:**
+- It is synthetic, and the same author wrote the correction, the corpus and the predictions, knowing H's scope. The fact that every prediction held says as much about the author's knowledge as about H.
+- It covers no real codebases and no other scale factors or spellings (`D(100)`, `10 ** 2`).
+- It does not test inter-procedural or cross-module flow, which H does not attempt.
+- It is not evidence about Muse; no model was involved.
 
 ## What the evidence says
 
