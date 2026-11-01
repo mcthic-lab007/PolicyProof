@@ -350,6 +350,23 @@ The rows above are from before `b434796`; this sweep is identical before and aft
   - **Estimated cost:** about $0.10 for 8 calls if usage matches the 2026-10-31 pilot (about 470 input and 2,900 output tokens per call, standard-mode prices). About $0.31 for 3 trials. Up to about 5× more if outputs are longer. These are estimates, not measurements.
 - The new targets were written by us, knowing which analyses would be measured. Their realism labels describe the mechanism, not the defect.
 
+## Methods G and H on corpus v3: predictions (committed before measurement)
+
+Two parse-only probe heuristics, each with its own switch and off by default (`src/policyproof/literal_heuristics.py`):
+- **G, numbers inside string literals** (`verify(string_probes=True)`, `benchmark.run --string-probes`). Plain decimals with at most two fractional digits inside any string literal except docstrings. A comma-grouped number is probed in both readings.
+- **H, integers read as cents** (`verify(cents_probes=True)`, `benchmark.run --cents-probes`). An integer of 100 or more is read as cents **only with evidence in the code**: it is compared with, or used to look up, the amount × 100, or it is bound to a name with the word "cent(s)". Integers without evidence are counted in the report, never silently read as cents.
+
+**Disclosure:** both were designed after v3 was measured, to answer the question that measurement raised: are `encoded-string-range` and `integer-cents-table` cheap to find without a model? Their finds on those two cases are therefore expected by construction. They are no evidence that G or H generalize. What the measurement can show is what each heuristic costs (probe calls, any change elsewhere) and whether it causes any false accusation or spurious claim.
+
+**Predictions, written from the code and a static dry run of both extractors over every target (no verification run):**
+- **Compatibility:** with both switches off, A, B and E reproduce the saved `a027049` report hashes for every case except the wall-clock case `time-limit-exhausted`.
+- **New probes:** G adds amounts only for `encoded-string-range` ($7,531.24, $7,531.89) and the correct control `correct-config-string` ($40.00). H adds them only for `integer-cents-table` ($6,543.21) and the v2 correct target `integer-cents` ($40.00). B already probes every other G amount, so the other cases' search behaviour is unchanged when B is on.
+- **Detection (primary, of 21):** A+G 15 (G also re-supplies B's string literals $777.77 and $12,345.67/$12,345.99); A+H 13; B+G 15; B+H 15; B+G+H 16; E+G 16; E+H 16; E+G+H 17. Exact location equals detection in each configuration.
+- **Sweep:** `encoded-string-range` (G) and `integer-cents-table` (H) are exactly located in 10/10 seeds at every budget from 250 up, and 0/10 at budget 0. Every other case is unchanged when B is on.
+- **Still missed by every configuration:** `hangs-at-40` (a hang is reported as unfinished), `loop-assembled-cent`, `imported-constant-cent`, and `converted-rounding-window` except by sampling luck (0/0/1/3 seeds, as before).
+- **False accusations:** 0/10 and 0 spurious claims in every configuration. A probe is only a place to look, so neither heuristic can create a finding by itself.
+- **Verdicts (of 35):** each new detection turns a false-negative exit 0 into 3. B+G+H 31, E+G+H 32.
+
 ## What the evidence says
 
 1. **No false accusations and no spurious claims** (0/7 cases, 0/598 claims). When PolicyProof says "confirmed", the ground truth agreed every time in this corpus. The model-only, contradicting-expectation and conflicting-reference scenarios were correctly *not* confirmed.

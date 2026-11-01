@@ -126,6 +126,7 @@ from src.policyproof.target_search import (
     search as search_target,
 )
 from src.policyproof.constant_folding import FoldedConstants, fold_constants
+from src.policyproof.literal_heuristics import HeuristicAmounts, cents_amounts, string_amounts
 from src.policyproof.source_literals import SourceAmounts, source_amounts
 
 
@@ -275,6 +276,8 @@ def verify(
     proposed_probes: tuple[Decimal, ...] = (),
     proposed_probes_origin: str | None = None,
     constant_probes: bool = False,
+    string_probes: bool = False,
+    cents_probes: bool = False,
 ) -> VerificationResult:
     """Verify a rule document against ``policy_text``. The document is
     re-validated against this policy text first, so L0 never rests on where
@@ -285,8 +288,11 @@ def verify(
     first (see source_literals); they are probes, never evidence by
     themselves. With ``constant_probes``, constant expressions in the
     target's source are also folded to amounts and probed (see
-    constant_folding); the source is parsed, never executed. Problems in the
-    model's output become findings; this raises only for invalid arguments."""
+    constant_folding); the source is parsed, never executed. With
+    ``string_probes``, numbers written inside string literals are probed, and
+    with ``cents_probes``, integer literals the code marks as cents are read
+    as cents and probed (see literal_heuristics). Problems in the model's
+    output become findings; this raises only for invalid arguments."""
     if not isinstance(policy_text, str) or not policy_text.strip():
         raise ValueError("policy_text must be a non-empty string")
     if isinstance(search_budget, bool) or not isinstance(search_budget, int) \
@@ -338,6 +344,8 @@ def verify(
     outcome: SearchOutcome | None = None
     hints: SourceAmounts | None = None
     folded: FoldedConstants | None = None
+    strings: HeuristicAmounts | None = None
+    cents: HeuristicAmounts | None = None
     proposed: tuple[Decimal, ...] = ()
     search_points: list[PointResult] = []
     try:
@@ -352,10 +360,17 @@ def verify(
                 hints = source_amounts(target.decide, low, high)
             if constant_probes:
                 folded = fold_constants(target.decide, low, high)
+            if string_probes:
+                strings = string_amounts(target.decide, low, high)
+            if cents_probes:
+                cents = cents_amounts(target.decide, low, high)
             proposed = tuple(sorted({a for a in proposed_probes if low <= a <= high}))
+            probes = set(proposed)
+            for found in (hints, folded, strings, cents):
+                if found is not None:
+                    probes |= set(found.amounts)
             outcome = _search(engine, results, reference, run_target, search_budget, search_seed,
-                              tuple(sorted(set(hints.amounts if hints else ())
-                                           | set(folded.amounts if folded else ()) | set(proposed))))
+                              tuple(sorted(probes)))
             range_findings, search_points = _range_findings(outcome, results, document, reference)
             findings += range_findings
             if outcome.unjudged:
@@ -379,7 +394,7 @@ def verify(
         points=[_point_record(result) for result in (*results, *search_points)],
         findings=[_finding_record(finding) for finding in findings],
         target_search=_search_section(outcome, target, search_budget, reference, hints,
-                                      proposed, proposed_probes_origin, folded),
+                                      proposed, proposed_probes_origin, folded, strings, cents),
         target_execution=_execution_section(target, worker),
     )
     report["verification"]["result"] = verdict(findings, level, required_level)
@@ -831,7 +846,9 @@ def _execution_section(target, worker: TargetWorker | None) -> dict[str, Any]:
 def _search_section(outcome: SearchOutcome | None, target, budget, reference,
                     hints: SourceAmounts | None = None, proposed: tuple[Decimal, ...] = (),
                     proposed_origin: str | None = None,
-                    folded: FoldedConstants | None = None) -> dict[str, Any]:
+                    folded: FoldedConstants | None = None,
+                    strings: HeuristicAmounts | None = None,
+                    cents: HeuristicAmounts | None = None) -> dict[str, Any]:
     if outcome is None:
         reason = "no target supplied" if target is None else "search budget is 0"
         return {"performed": False, "reason": reason}
@@ -872,6 +889,27 @@ def _search_section(outcome: SearchOutcome | None, target, budget, reference,
                     "evaluator over the syntax tree (the source was parsed, never executed), "
                     "probed with one cent either side. Unsupported expressions are listed, not "
                     "guessed. A probe is evidence only through the decisions observed there.",
+        }}),
+        **({} if strings is None else {"string_amounts": {
+            "read_from": strings.source,
+            "unavailable": strings.unavailable,
+            "amounts": [str(a) for a in strings.amounts],
+            "found_in": {str(a): list(v) for a, v in strings.origins.items()},
+            "note": "Numbers written inside string literals of the target's source (docstrings "
+                    "skipped), probed with one cent either side. The source was parsed, never "
+                    "executed. A probe is evidence only through the decisions observed there.",
+        }}),
+        **({} if cents is None else {"cents_amounts": {
+            "read_from": cents.source,
+            "unavailable": cents.unavailable,
+            "amounts": [str(a) for a in cents.amounts],
+            "evidence": {str(a): list(v) for a, v in cents.origins.items()},
+            "integers_not_read_as_cents": cents.integers_without_evidence,
+            "note": "Integer literals read as cents only where the code itself says so: compared "
+                    "with or looked up by the amount x 100, or bound to a name meaning cents. "
+                    "Other integers are not read as cents. Probed with one cent either side; the "
+                    "source was parsed, never executed. A probe is evidence only through the "
+                    "decisions observed there.",
         }}),
         "strategy": (
             "For each value of has_service_date: amounts written in the target's source and "
