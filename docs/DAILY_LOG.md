@@ -238,3 +238,36 @@ No log was kept that day; this entry is reconstructed from the commit history on
 3. Decide how the demo presents Muse: as a proposer whose output PolicyProof checks, not as the source of a detection that E does not also make.
 
 **Commit identity (2026-10-31):** GitHub declined the push because the commits carried the author's private email. With the author's approval, the three unpushed commits were rebuilt on their identical trees with the account's noreply address, keeping messages, order and author dates. The new hashes are `c0a0fd8` (was `b60b386`), `eb79c45` (was `9f8ee66`) and `cf2eebc` (was `59b73da`). The originals are kept on the local branch `backup/muse-probe-experiment-59b73da`. `472257c` and everything earlier are unchanged.
+
+## 2026-10-31 (fourth session) and 2026-11-01: live verification call, recovery audit, BOM fix
+
+**Branch:** `feat/live-demo-evidence`, from `master` = `68118fe`. The third session's log entry and contribution rows 21-22 are on `feat/benchmark-v3` (`c540446`), not merged yet; this branch's rows are numbered 23-24 to fit after them.
+
+**Authorization (the author, 18:12:42 UTC on 2026-10-31):** the two free deterministic heuristics, and one live demo call. Not authorized: the eight-call v3 Muse run and any merge.
+
+**Fourth session (2026-10-31):**
+- `97ec8da`: `verification --live --save-response`, and `.env` key loading for `--live`. 458 tests OK before the commit.
+- **The one authorized live call**, 18:44:43-18:45:23 UTC: `verification --live --reference democo-meal --target democo-buggy --save-response artifacts/muse_live_002.json`.
+  - Model `muse-spark-1.3`, response `resp_6ae63743a8b7a612db3b4fc2`, `completed`; 669 input and 9,419 output tokens (8,697 reasoning); about $0.04 estimated.
+  - Report labelled `LIVE`: L2, exit 3. Muse proposed 3 rules and 6 test cases; all 6 expectations agree. The $40.00 discrepancy was confirmed by the independent reference and the executed rules, plus two `PRECEDENCE_DEPENDENT` findings.
+  - The API key is in none of the evidence files (checked against the actual key, without printing it).
+  - Replayed offline at 20:53 UTC: labelled `REPLAY_SAVED_LIVE_RESPONSE`, with identical findings, points and level.
+- `30d2b78` (README), pushed at 20:55 UTC. The laptop then shut down unexpectedly before the documentation was written and before the deterministic heuristics were started.
+
+**2026-11-01:**
+- **Recovery audit (read-only):** nothing was lost. Tree clean; `feat/benchmark-v3` and `feat/live-demo-evidence` both match their remotes; no `artifacts/muse_probes_v3`, so no v3 call was made. The deterministic heuristics exist only as a to-do in `feat/benchmark-v3`'s docs.
+- **Backup:** a copy of the five live-002 files exists in a folder outside the repository (made before this step); all five SHA-256 hashes match the originals, which match the hashes recorded right after the call.
+- **`de5519b`, BOM fix:** `source_literals` now reads target files as `utf-8-sig`, like `constant_folding`. `examples/buggy_engine.py` (BOM since `496bc75`, first noted in the second session) is unchanged.
+  - Three regression tests: with and without a BOM, the BOM demo engine, malformed source. With the fix reverted, the three fail.
+  - 461 tests OK locally.
+  - Benchmark corpus v2 on the same HEAD with and without the fix: 24 of 27 reports byte-identical for B and for E. The other three are the cases whose target is `examples/buggy_engine.py`, and only their `source_amounts` section differs. Scores unchanged: B sweep 110/111/111/111, E sweep 120/120, 0 spurious claims, all 27 exit codes as expected.
+  - The replay of `muse_live_002` now probes $40.00 from the source. Compared with the pre-fix replay, only the three `source_amounts` fields differ.
+  - The offline demo (written to a scratch folder, not `artifacts/demo`) exits 0, with every exit code as documented.
+- **Docs:** live-002 recorded in HACKATHON_CONTRIBUTIONS (rows 23-24, the live call count: three), README (stale "one live call" wording) and DEMO_STORYBOARD (replay fallback, the saved live output is not footage).
+
+**Live calls:** one (above). None on 2026-11-01.
+
+**Next decision (the author's):**
+1. Review and push this branch; check its CI.
+2. Implement and measure the two deterministic heuristics on `feat/benchmark-v3` (authorized, free).
+3. Authorize, or not, the eight-call v3 Muse run, and the merges of both branches. Expect a small, mechanical conflict in DAILY_LOG and HACKATHON_CONTRIBUTIONS, where both branches append.
