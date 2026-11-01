@@ -905,6 +905,7 @@ def _search_section(outcome: SearchOutcome | None, target, budget, reference,
             "amounts": [str(a) for a in cents.amounts],
             "evidence": {str(a): list(v) for a, v in cents.origins.items()},
             "integers_not_read_as_cents": cents.integers_without_evidence,
+            "declined": list(cents.declined),
             "note": "Integer literals read as cents only where the code itself says so: compared "
                     "with or looked up by the amount x 100, or bound to a name meaning cents. "
                     "Other integers are not read as cents. Probed with one cent either side; the "

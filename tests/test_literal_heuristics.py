@@ -169,10 +169,14 @@ class CentsAmountTests(unittest.TestCase):
     def test_table_lookups_and_the_factor_is_not_an_amount(self):
         self.assertEqual(h(_cents_lookups), ["314.15", "2500.99"])  # never 1.00 from the factor 100
 
-    def test_documented_limit_a_percentage_counts_as_scale(self):
-        # amount / 40 * 100 > 250 is a percentage; H reads 250 as $2.50.
-        # The cost is three probe calls, never a finding.
-        self.assertEqual(h(_percentage), ["2.50"])
+    def test_a_percentage_is_declined_not_read_as_cents(self):
+        # amount / 40 * 100 > 250 is a percentage. Until the 2026-11-01
+        # correction H read 250 as $2.50 (a documented limit); it now abstains
+        # and says why.
+        found = cents_amounts(_percentage, LOW, HIGH)
+        self.assertEqual(found.amounts, ())
+        self.assertEqual(len(found.declined), 1)
+        self.assertTrue(found.declined[0].startswith("ratio:"))
 
     def test_other_targets(self):
         self.assertEqual(h(v3.encoded_string_range), [])

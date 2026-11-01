@@ -31,12 +31,30 @@ Integers of 100 or more without such evidence are not read as cents; the
 result counts them, so the omission is never silent. The factor 100 of a
 scaling expression is not itself read as an amount.
 
+H abstains, and records why in ``declined``, when the unit is ambiguous:
+  ratio         a division takes part in the scaled expression
+                (``amount / limit * 100`` is a percentage, ``amount * 100 /
+                limit`` too): no scale evidence from it;
+  contradicted  a name meaning cents is compared directly with the amount
+                in dollars (``case.amount <= LIMIT_CENTS``): the code itself
+                uses it as dollars, so the name is not evidence.
+
+The factor is recognised as 100 or 100.0, or ``Decimal(100)``,
+``Decimal("100")``, ``decimal.Decimal(100)`` (the call named Decimal with
+one literal argument). An alias (``D = Decimal``), ``10 ** 2`` or a named
+constant holding 100 is not recognised; those give no scale evidence.
+
 Limits: no inter-procedural data flow (a helper that converts to cents is
-not followed), no other scale factors (mills, basis points), names from
-other modules are not followed, and a percentage computed as
-``amount / limit * 100`` compared with an integer would count as scale
-evidence. The cost of a wrong reading is three probe calls, never a
+not followed), no tuple unpacking (``lo, hi = BAND``), no other scale
+factors (mills, basis points), and names from other modules are not
+followed. The cost of a wrong reading is three probe calls, never a
 finding.
+
+Correction (2026-11-01): marking the nodes of a ``Decimal(100)`` factor
+also marked Python's single shared ``ast.Load`` context object, so every
+loaded name looked "already scaled" and tables looked up by
+``Decimal(100) * amount`` were never read. Context objects are no longer
+marked.
 """
 
 import ast
@@ -59,6 +77,7 @@ _PLAIN_NUMBER = re.compile(_BOUND_BEFORE + r"(?!0\d)\d{1,7}(?:\.\d{1,2})?" + _BO
 _GROUPED_NUMBER = re.compile(r"(?<![\w.,])\d{1,3}(?:,\d{3}){1,2}(?:\.\d{1,2})?" + _BOUND_AFTER)
 _NAME_WORDS = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
 _CENT_WORDS = {"cent", "cents"}
+_DIVIDE = (ast.Div, ast.FloorDiv, ast.Mod)
 
 
 @dataclass(frozen=True)
@@ -71,6 +90,8 @@ class HeuristicAmounts:
     unavailable: str | None = None
     # H only: integers >= MIN_CENTS in scope that had no cents evidence.
     integers_without_evidence: int = 0
+    # H only: readings H abstained from because the unit is ambiguous.
+    declined: tuple[str, ...] = ()
 
 
 def _whole_cents(text: str) -> Decimal | None:
@@ -181,12 +202,20 @@ class _Cents:
                     self.local.setdefault(name, item.value)
         self.factors: set[int] = set()  # the 100s of scaling expressions
         self.scaled_names: set[str] = set()
+        self.declined: list[str] = []
         for item in ast.walk(function_tree):
             if isinstance(item, ast.BinOp) and isinstance(item.op, ast.Mult):
                 for factor, other in ((item.left, item.right), (item.right, item.left)):
                     if _is_hundred(factor) and _mentions_amount(other):
-                        self.factors.add(id(factor))
-                        self.factors.update(id(n) for n in ast.walk(factor))
+                        if any(isinstance(n, ast.BinOp) and isinstance(n.op, _DIVIDE) for n in ast.walk(other)):
+                            self._decline(f"ratio: {ast.unparse(item)} divides before x 100 "
+                                          "(a percentage or ratio, not cents)")
+                            continue
+                        # Never the expr_context objects (ast.Load...): Python
+                        # shares one instance across all names, so marking it
+                        # made every name look scaled.
+                        self.factors.update(id(n) for n in ast.walk(factor)
+                                            if not isinstance(n, ast.expr_context))
         changed = True
         while changed:  # local names holding the amount in cents, to a fixed point
             changed = False
@@ -195,9 +224,21 @@ class _Cents:
                     self.scaled_names.add(name)
                     changed = True
 
-    def scaled(self, node: ast.AST) -> bool:
+    def _decline(self, why: str) -> None:
+        if why not in self.declined:
+            self.declined.append(why)
+
+    def _holds_scale(self, node: ast.AST) -> bool:
         return any(id(n) in self.factors or (isinstance(n, ast.Name) and n.id in self.scaled_names)
                    for n in ast.walk(node))
+
+    def divided(self, node: ast.AST) -> bool:
+        """A division takes part in a scaled expression (amount x 100 / limit)."""
+        return any(isinstance(n, ast.BinOp) and isinstance(n.op, _DIVIDE) and self._holds_scale(n)
+                   for n in ast.walk(node))
+
+    def scaled(self, node: ast.AST) -> bool:
+        return self._holds_scale(node) and not self.divided(node)
 
     def integers(self, node: ast.AST, seen: frozenset = frozenset()):
         """(literal, binding name or None) for every int literal in ``node``,
@@ -218,9 +259,19 @@ class _Cents:
             if literal >= MIN_CENTS and why not in evidence.setdefault(literal, []):
                 evidence[literal].append(why)
 
+        contradicted: set[str] = set()
         for item in ast.walk(self.function):
             if isinstance(item, ast.Compare):
                 operands = [item.left, *item.comparators]
+                if any(self.divided(o) for o in operands):
+                    self._decline(f"ratio: {ast.unparse(item)} compares a scaled amount after a division")
+                    continue
+                if any(_mentions_amount(o) and not self._holds_scale(o) for o in operands):
+                    for o in operands:  # a cents name used as dollars, not converted
+                        if isinstance(o, ast.Name) and _cent_word(o.id):
+                            contradicted.add(o.id)
+                            self._decline(f"contradicted: {o.id} is compared directly with the amount "
+                                          "in dollars, so its name is not cents evidence")
                 if any(self.scaled(o) for o in operands):
                     for operand in operands:
                         if not self.scaled(operand):
@@ -237,7 +288,7 @@ class _Cents:
                     add(literal, f"scale: {literal} is in a table looked up by the amount x 100"
                                  + (f" (via {name})" if name else ""))
         for name, value in [*self.module.items(), *self.local.items()]:
-            if _cent_word(name):
+            if _cent_word(name) and name not in contradicted:
                 for literal, _ in self.integers(value, frozenset({name})):
                     add(literal, f"name: {literal} is bound to {name}")
         return evidence
@@ -260,4 +311,5 @@ def cents_amounts(function: Callable, low: Decimal, high: Decimal) -> HeuristicA
     evidence = analysis.read()
     found = {(Decimal(literal) / 100).quantize(CENT): reasons for literal, reasons in evidence.items()}
     without = len(analysis.all_integers([node, *constants]) - set(evidence))
-    return _finish(found, where, low, high, integers_without_evidence=without)
+    return _finish(found, where, low, high, integers_without_evidence=without,
+                   declined=tuple(analysis.declined))
