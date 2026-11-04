@@ -319,7 +319,17 @@ Remove-Item Env:META_MUSE_API_KEY
 
 You can then replay a saved response offline with `--replay artifacts/muse_live_001.json`.
 
-During development, one live `muse-spark-1.3` call produced 3 rules and 6 test cases, and the validator accepted them. Replayed, they confirm the same $40.00 discrepancy, plus two `PRECEDENCE_DEPENDENT` findings: Muse's amount rules omit the date condition and rely on the review rule's priority, and Muse recorded that as an assumption. That saved response is **not** in this repository. The documented demo uses the synthetic fixture so anyone can reproduce it.
+Alternatively, put `META_MUSE_API_KEY=...` in a root `.env` file, which is Git-ignored. `--live` reads that one key from it when the shell has none, and never prints it. To keep the evidence of a live verification run, add `--save-response PATH`. It saves Muse's raw response body, with its usage record, immediately after the call, and it refuses to replace an existing file:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.policyproof.verification examples/democo_meal_policy.txt --live --reference democo-meal --target democo-buggy --save-response artifacts/muse_live_002.json
+```
+
+During development, two live `muse-spark-1.3` calls on this path each produced 3 rules and 6 test cases, and the validator accepted both.
+- **2026-10-27:** saved with `muse_client --save-response`. Replayed, its rules confirm the $40.00 discrepancy.
+- **2026-10-31:** a live verification run with `--save-response` (response `resp_6ae63743a8b7a612db3b4fc2`). Its report is labelled `LIVE`: level L2, exit code 3, all 6 of Muse's expectations agree with the executed rules, and the $40.00 discrepancy is confirmed by the independent reference and the rules.
+
+Both give the same two `PRECEDENCE_DEPENDENT` findings: Muse's amount rules omit the date condition and rely on the review rule's priority, and Muse recorded that as an assumption. PolicyProof also derives the $40.00 test point from the policy text itself, so this shows Muse's proposals being checked, not Muse finding the bug alone. Neither saved response is in this repository; [docs/HACKATHON_CONTRIBUTIONS.md](docs/HACKATHON_CONTRIBUTIONS.md) lists every live call. The documented demo uses the synthetic fixture so anyone can reproduce it.
 
 ## Security and provenance
 
@@ -338,7 +348,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
 - **Provenance labels.** Every result is labelled `LIVE`, `REPLAY_SAVED_LIVE_RESPONSE`, `REPLAY_SYNTHETIC` or `REPLAY_UNKNOWN_ORIGIN`. The labels come from the call path or the file and are **not** cryptographic proof of origin.
 - **Policy text is untrusted.** In the prompt it's fenced as data. Instructions inside it can't make a rule cite text that isn't in the policy, or a threshold the policy doesn't state, because validation would reject it.
 - **What the report contains:** a hash of the policy, not its text. It does include evidence quotes and rule descriptions, which are excerpts of the policy, so treat reports like the policy itself.
-- **Data retention:** the live response received during development reported `"store": true`. Use synthetic policies with live mode.
+- **Data retention:** all three live responses received during development reported `"store": true`. Use synthetic policies with live mode.
 - **Git exclusions:** `.gitignore` excludes `.env*` (except `.env.example`), `.venv/`, caches and `artifacts/`, where live responses and reports are saved.
 
 ## Limitations and non-goals
@@ -351,7 +361,7 @@ During development, one live `muse-spark-1.3` call produced 3 rules and 6 test c
   - Worker isolation has been tested on Windows only; CI covers Linux once the branch is pushed.
   - **Timeouts are not evaluations.** Until 2026-10-28, a correct target slower than `--target-timeout` was falsely accused. Now a timed-out call is reported as not evaluated: the run exits 3, below L3, and is never confirmed as wrong. The trade-off is that a target that genuinely hangs is no longer *confirmed* wrong at that input; it is reported as unfinished instead. Exit-code change: with no reference, a hang used to exit 4 (`TARGET_DISCREPANCY_MODEL_ONLY`) and now exits 3 (`UNSUPPORTED`). Exceptions and non-decision return values still count as the target's answer and can be confirmed; the failure kind is recorded with the finding.
 - **Target search:** it samples within a budget, as described above, and can miss isolated faulty amounts. In the [benchmark](docs/BENCHMARK.md), a single wrong cent and a 33-cent range were missed in all 40 search-enabled runs (budgets 250 to 8000, 10 seeds each) until source-amount probes were added. They are now found in 40 of 40, because both amounts are written in the targets' source. A narrow range whose edges are computed (no literal equals them) is still found in only 1 of 10 seeds at budgets of 1000 or more. A discrepancy found at an evaluated point is bisected to its edges like any other range, as long as the search budget isn't 0. A verified edge means both cents were evaluated; amounts inside a range are sampled, not all checked. Search calls that cannot be judged (for example, skipped by the time limit) produce an error finding and block L3.
-- **Live API contract:** the request and success-response shape were confirmed by one live call. Refusal, error and incomplete-response shapes follow the OpenAI-compatible format and haven't been seen live. The client makes no retries and the 120-second timeout applies per read, not to the whole request.
+- **Live API contract:** the request and success-response shape were confirmed by three live calls, all `completed`. Refusal, error and incomplete-response shapes follow the OpenAI-compatible format and haven't been seen live. The client makes no retries and the 120-second timeout applies per read, not to the whole request.
 - **Legacy modules:** `verifier.py`, `reporting.py` and `generator.py` are the original prototype and are kept for their existing tests.
 - **Non-goals:**
   - proving that a policy is correct or complete;

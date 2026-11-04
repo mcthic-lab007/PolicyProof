@@ -87,7 +87,9 @@ def _resolve(function: Callable):
         return "source not available: not a named function"
     try:
         node = ast.parse(textwrap.dedent("".join(lines)))
-        module = ast.parse(Path(path).read_text(encoding="utf-8"))
+        # utf-8-sig, as in constant_folding: Python itself accepts a source
+        # file that starts with a UTF-8 byte-order mark, so the parser must too.
+        module = ast.parse(Path(path).read_text(encoding="utf-8-sig"))
     except (OSError, SyntaxError, UnicodeDecodeError, ValueError) as exc:
         return f"source could not be parsed: {exc}"
 

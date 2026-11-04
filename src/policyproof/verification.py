@@ -95,7 +95,9 @@ from src.policyproof.muse_client import (
     MuseProposal,
     ProposalRejectedError,
     describe_provenance,
+    load_api_key_from_dotenv,
     replay_proposal,
+    save_response,
 )
 from src.policyproof.rule_engine import (
     NUMERIC_DOMAINS,
@@ -1387,24 +1389,38 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"seed for the target search (default {DEFAULT_SEED})")
     parser.add_argument("--no-source-probes", action="store_true",
                         help="do not probe amounts written in the target's source code")
+    parser.add_argument("--save-response", type=Path, metavar="PATH",
+                        help="live mode only: save Muse Spark's raw response body (with its "
+                        "usage record) for later --replay; an existing file is never replaced")
     args = parser.parse_args(argv)
 
     if args.overwrite and not args.report:
         return _fail("--overwrite only applies to --report")
     if args.report and args.report.exists() and not args.overwrite:
         return _fail(f"{args.report} already exists; pass --overwrite to replace it")
+    if args.save_response and not args.live:
+        return _fail("--save-response records live calls; it cannot be used with --replay")
+    # Checked before the call, so a paid call is never made only to be lost;
+    # live evidence is never overwritten.
+    if args.save_response and args.save_response.exists():
+        return _fail(f"{args.save_response} already exists; live evidence is never replaced")
 
     try:
         policy_text = args.policy.read_text(encoding="utf-8")
         if args.replay:
             proposal = replay_proposal(args.replay, policy_text)
         else:
+            load_api_key_from_dotenv(DOTENV)  # only when no key is set; never printed
             proposal = MuseClient.from_env().propose_rules(policy_text)
     except ProposalRejectedError as exc:
+        if args.save_response and _save_live(exc.response_body, args.save_response):
+            return 1
         result = rejection_result(exc, policy_text)
     except (MuseClientError, ValueError, OSError) as exc:
         return _fail(str(exc))
     else:
+        if args.save_response and _save_live(proposal.response_body, args.save_response):
+            return 1
         references, targets = _registry()
         result = verify(
             proposal.document, policy_text, proposal=proposal,
@@ -1426,6 +1442,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Report written to {args.report}. It quotes policy evidence; handle it like the policy.")
 
     return result.report["verification"]["result"]["exit_code"]
+
+
+# Git-ignored; read by --live only, for META_MUSE_API_KEY only.
+DOTENV = Path(__file__).resolve().parents[2] / ".env"
+
+
+def _save_live(body: dict, path: Path) -> bool:
+    """Save a live response body right after the call. True on failure."""
+    try:
+        save_response(body, path, overwrite=False)
+    except OSError as exc:
+        _fail(f"could not save response: {exc}")
+        return True
+    print(f"Saved the live response body to {path}. It quotes the policy text; "
+          "handle it as you would the policy.")
+    return False
 
 
 def _print_summary(result: VerificationResult) -> None:
