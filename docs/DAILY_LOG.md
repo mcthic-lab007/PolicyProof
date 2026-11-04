@@ -390,3 +390,41 @@ No log was kept that day; this entry is reconstructed from the commit history on
 1. Push `feat/h-correction-g2` for CI.
 2. Merge order of the three feature branches.
 3. The two remaining Muse calls and repeat trials (unauthorized).
+
+## 2026-11-02 to 2026-11-04 (between sessions): push and CI of `feat/h-correction-g2`
+
+Reconstructed from GitHub, not from a session log: `feat/h-correction-g2` (`ebd755d`) was pushed and CI run 41401355269 succeeded on it, created 2026-11-02 06:40 UTC (512 tests: 510 passed, 2 expected skips, as reported by the author).
+
+## 2026-11-04 (15:45–, UTC): release integration
+
+**Start state (verified 16:00 UTC):** `master` = `origin/master` = `68118fe`; `feat/benchmark-v3` `5768b2e`, `feat/h-correction-g2` `ebd755d` and `feat/live-demo-evidence` `1de39c1`, each equal to its remote; clean tree; no tags; no `release/final`. `feat/benchmark-v3` is an ancestor of `feat/h-correction-g2`, so it was not merged separately. **Authorized:** a release branch from `origin/master`, the two merges, documentation fixes, local checks, pushing the release branch and, once every gate passes, fast-forwarding `master`. **Not authorized:** live calls, spending, unrelated merges, force pushes, branch deletion, recording or submitting.
+
+**Done:**
+- Local tag `pre-release-final-master` → `68118fe`, then `release/final` from `origin/master` (its upstream was unset so a plain `git push` cannot reach `master`).
+- `d810bae`: merge of `feat/h-correction-g2`, no conflicts. 512 tests OK locally.
+- `a955f41`: merge of `feat/live-demo-evidence`. Conflicts only in `HACKATHON_CONTRIBUTIONS.md` and this log. Both sides were kept (checked: no line of either parent lost except the two branch-local live-call counts and the shorter merge list). The live-call count is now nine, checked against the nine distinct response ids saved in `artifacts/`. `verification.py` and the README merged cleanly. 520 tests OK locally (512 + 8 from the live-demo branch).
+- One interaction to note: G and H reuse `source_literals._resolve`, so the byte-order-mark fix now applies to them too. No benchmark target starts with a BOM; `examples/buggy_engine.py` does, which is the fix's purpose.
+
+**Validation on `a955f41` (clean tree):**
+- Tests: `.venv\Scripts\python.exe -B -m unittest discover -s tests -t .` → 520 run, OK, 0 skipped locally (the saved live response is present), about 63 s.
+- Benchmarks re-run, fingerprints computed with the formula of `artifacts/benchmark/g2-gate-analysis.py`: all 12 equal the saved results.
+  - v3: A `f57880153f5fd944` 12/21, B `86899a835639bd70` 14/21, E `69800ca1bf6e8899` 15/21, E+G+H `0f552a446fe55616` 17/21; 0/10 false accusations, 0 spurious claims. Only `time-limit-exhausted` is nondeterministic, as documented.
+  - g2: A `22907e917286958f` 0/16, B and E `4f49027410debd78` 1/16, A+G `dc4e582cf1312f5a` 2/16, A+H `7953e6f415402954` 8/16, A+G+H `3ca1d7154a56e73b` 10/16, B+G+H and E+G+H `bc87ee1a4ec808c5` 11/16; 0/8 false accusations, 0 spurious claims, reproducible. The old-H ablation (criterion 1's "2 of 6") was not re-run: it needs the `018b5ee` worktree.
+  - v2 default: 14/15 detected, 14/15 exactly located, 0/8 false accusations, 0 spurious claims, 27/27 exit codes.
+  - Muse v3 replay (offline, the six saved responses, labelled `REPLAY_SAVED_LIVE_RESPONSE`): `evaluate` gives E+G+H+Muse 19/21, 0/10 false accusations, equal to the saved file apart from timings, report hashes and the wall-clock case's worker counts. `sweep` scores and summaries are identical to the saved ones, but its fingerprint changed (`aa2d7229…` against `ff17fde1…`): it hashes report bytes, and `c4a0694` adds H's declines to every H-enabled report. Only EGH and EGHM rows differ, only in `report_sha256`; without report hashes both give `cd3f5e9ddd272618`. Recorded in BENCHMARK.md.
+- CLI, offline with the synthetic fixture: buggy 3 (L2, $40.00 confirmed), fixed 0 (L3), loophole 3 (range $1,000.00–$4,999.99), loophole with `--search-budget 0` 0 (L3), no reference 4, no reference with `--require-level L3` 4 (inconclusive takes precedence, as documented), fixed without reference with `--require-level L3` 5, fixed with reference and `--require-level L3` 0. `--replay` of `muse_live_002.json` prints `REPLAY of a saved response` and exits 3.
+- Demo: `python -m src.policyproof.demo --output-dir <scratch>` exits 0 and writes four reports and four pages. The pages have no `<script>` and a `default-src 'none'` content-security policy; checked as files, not opened in a browser.
+- Secrets: the key in `.env` (ignored by `.gitignore:2`, never committed) appears in no tracked file, no commit in any branch's history and no artifact; nor do its last eight characters. Pattern scan of tracked files: only the README's hidden-prompt instruction and a test's fake key.
+
+**Documentation commit:**
+- `evidence/live/`: byte-identical copies of the nine saved live responses, the v3 cost ledger, and the `muse_live_002` report and terminal output, with SHA-256 hashes. Reviewed first: no key, no local paths, names, e-mail or account fields; the content is the synthetic policy or benchmark excerpts already in the repository, plus Muse's output. `artifacts/` stays ignored and the tests are unchanged. A first staging failed a byte check: `core.autocrlf=true` would have converted their line endings, so a clone would not match the hashes. `.gitattributes` now stores `evidence/live/**` without conversion, and all twelve staged blobs were re-checked against the hashes.
+- README: links at the top, a results table with the re-measured figures, the test count (394 → 520), nine live calls (one `incomplete` at its output cap).
+- Storyboard rewritten with the checked outputs; the Muse beat is now the v3 loop-assembled cent, labelled as a saved live response and as an artificial engine.
+- Contributions: row 30, the new merge commits, the prototype tool still unnamed.
+
+**CI:** release run 41864179591 on `a955f41`: success, completed 16:07:39 UTC; annotation "Ran 520 tests | OK (skipped=2) | passed=518 failed=0 errors=0 skipped=2" (the two skips are the saved-live-response replays, absent in CI). The job briefly showed as queued in the API after the run reported success. GitHub reported a partial Actions outage during this session.
+
+**Open:**
+- The tool that wrote the 2026-10-27 prototype is still not named (author's input).
+- Track and submission-form fields are not in the repository; the official pages read on 2026-11-04 list the deadline (9:00 PM ET, 2026-11-04) and two tracks (Indie, Startup) but no submission fields.
+- A live take for the video needs the author's authorization; otherwise the demo uses labelled replays.

@@ -1,0 +1,4 @@
+# Saved live API responses are evidence: store them byte for byte so their
+# published SHA-256 hashes hold on every checkout, whatever core.autocrlf is.
+evidence/live/** -text
+evidence/live/README.md text

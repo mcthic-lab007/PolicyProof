@@ -1,0 +1,17 @@
+Saved the live response body to artifacts\muse_live_002.json. It quotes the policy text; handle it as you would the policy.
+LIVE: Muse Spark API response (muse-spark-1.3, response id resp_6ae63743a8b7a612db3b4fc2)
+Verification level: L2
+  L0 met: The rules passed schema validation and evidence grounding, and the interpreter supports every construct they use.
+  L1 met: 10 points executed; 0 without a decision; 6 of 6 model expectations agree; 5 precedence-dependent point(s) reported.
+  L2 met: interpreted rules and reference agree at every evaluated point
+  L3 not met: target does not agree with the reference at every evaluated point
+Target execution: isolated worker process, 2 s per call, 1510 calls, 0 timeout(s), 0 crash(es), 0 skipped; not a security sandbox.
+Target search: 1500 target calls (1500 probes, 0 bisection) of a budget of 2000, seed 20261104; 0 discrepancy range(s) found, 0 evaluation(s) not judged. Sampling, not exhaustive.
+Source amounts probed: none (source could not be parsed: invalid non-printable character U+FEFF (<unknown>, line 1)).
+INFO    PRECEDENCE_DEPENDENT: missing-date-review (REVIEW) overrides small-amount-approve (APPROVE) at 3 point(s) only because of its higher priority. First-match priority resolves this under the declared contract; the policy text does not itself state the order. A rule records this as an assumption. [point-0.00-undated, point-39.99-undated, point-40.00-undated]
+INFO    PRECEDENCE_DEPENDENT: missing-date-review (REVIEW) overrides large-amount-reject (REJECT) at 2 point(s) only because of its higher priority. First-match priority resolves this under the declared contract; the policy text does not itself state the order. A rule records this as an assumption. [point-40.01-undated, point-1000000.00-undated]
+ERROR   TARGET_DISCREPANCY_CONFIRMED: The target decides REJECT at amount $40.00 with a service date. The independent reference and the executed proposed rules both decide APPROVE (rule small-amount-approve, citing "Meal claims of $40.00 or less are approved automatically."). [point-40.00-dated]
+INFO    CHECKED: All available perspectives agree at 9 of 10 point(s).
+Not established: semantic correctness; see the report's scope and not_established.
+Result: FAILED (exit code 3): error findings: a confirmed target discrepancy, a defect in the proposal, or part of the verification that could not run
+Report written to artifacts\live-002-report.json. It quotes policy evidence; handle it like the policy.

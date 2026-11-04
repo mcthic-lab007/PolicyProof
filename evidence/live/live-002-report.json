@@ -1,0 +1,1290 @@
+{
+  "domain": {
+    "amount": [
+      "0.00",
+      "1000000.00"
+    ],
+    "amount_note": "whole cents; the schema's representable range, not a policy limit",
+    "has_service_date": [
+      false,
+      true
+    ]
+  },
+  "excluded_points": [],
+  "findings": [
+    {
+      "code": "PRECEDENCE_DEPENDENT",
+      "details": {
+        "assumption_documented": true,
+        "assumption_text": [
+          "Assumption: Missing service date takes precedence over amount rules; claims without a service date require manual review regardless of amount.",
+          "Assumption: This amount rule applies after the service-date check; claims at or below threshold are approved when the prior rule does not apply."
+        ],
+        "deciding_rule": "missing-date-review",
+        "overridden_rules": [
+          {
+            "decision": "APPROVE",
+            "rule_id": "small-amount-approve"
+          }
+        ],
+        "reference_agrees_with_priority_result": true
+      },
+      "points": [
+        "point-0.00-undated",
+        "point-39.99-undated",
+        "point-40.00-undated"
+      ],
+      "rules": [
+        "missing-date-review",
+        "small-amount-approve"
+      ],
+      "severity": "info",
+      "summary": "missing-date-review (REVIEW) overrides small-amount-approve (APPROVE) at 3 point(s) only because of its higher priority. First-match priority resolves this under the declared contract; the policy text does not itself state the order. A rule records this as an assumption."
+    },
+    {
+      "code": "PRECEDENCE_DEPENDENT",
+      "details": {
+        "assumption_documented": true,
+        "assumption_text": [
+          "Assumption: Missing service date takes precedence over amount rules; claims without a service date require manual review regardless of amount.",
+          "Assumption: This amount rule applies after the service-date check; claims above threshold are rejected when prior rules do not apply."
+        ],
+        "deciding_rule": "missing-date-review",
+        "overridden_rules": [
+          {
+            "decision": "REJECT",
+            "rule_id": "large-amount-reject"
+          }
+        ],
+        "reference_agrees_with_priority_result": true
+      },
+      "points": [
+        "point-40.01-undated",
+        "point-1000000.00-undated"
+      ],
+      "rules": [
+        "missing-date-review",
+        "large-amount-reject"
+      ],
+      "severity": "info",
+      "summary": "missing-date-review (REVIEW) overrides large-amount-reject (REJECT) at 2 point(s) only because of its higher priority. First-match priority resolves this under the declared contract; the policy text does not itself state the order. A rule records this as an assumption."
+    },
+    {
+      "code": "TARGET_DISCREPANCY_CONFIRMED",
+      "details": {
+        "disputed_because": [],
+        "interpreted": "APPROVE",
+        "model_expectations": [
+          "APPROVE"
+        ],
+        "reference": "APPROVE",
+        "target": "REJECT",
+        "target_error": null,
+        "target_failure": null
+      },
+      "points": [
+        "point-40.00-dated"
+      ],
+      "rules": [
+        "small-amount-approve"
+      ],
+      "severity": "error",
+      "summary": "The target decides REJECT at amount $40.00 with a service date. The independent reference and the executed proposed rules both decide APPROVE (rule small-amount-approve, citing \"Meal claims of $40.00 or less are approved automatically.\")."
+    },
+    {
+      "code": "CHECKED",
+      "details": {
+        "perspectives": [
+          "interpreted",
+          "expected",
+          "reference",
+          "target"
+        ]
+      },
+      "points": [
+        "point-0.00-undated",
+        "point-0.00-dated",
+        "point-39.99-undated",
+        "point-39.99-dated",
+        "point-40.00-undated",
+        "point-40.01-undated",
+        "point-40.01-dated",
+        "point-1000000.00-undated",
+        "point-1000000.00-dated"
+      ],
+      "rules": [],
+      "severity": "info",
+      "summary": "All available perspectives agree at 9 of 10 point(s)."
+    }
+  ],
+  "points": [
+    {
+      "amount": "0.00",
+      "has_service_date": false,
+      "id": "point-0.00-undated",
+      "interpreted": {
+        "conflicting_matches": true,
+        "decided_by": "missing-date-review",
+        "decision": "REVIEW",
+        "matching_rule_ids": [
+          "missing-date-review",
+          "small-amount-approve"
+        ],
+        "status": "DECIDED",
+        "trace": [
+          {
+            "conditions": [
+              {
+                "actual": false,
+                "expected": false,
+                "field": "has_service_date",
+                "holds": true,
+                "index": 0,
+                "operator": "=="
+              }
+            ],
+            "decided": true,
+            "decision": "REVIEW",
+            "matched": true,
+            "priority": 1,
+            "rule_id": "missing-date-review"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "0.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": true,
+                "index": 0,
+                "operator": "<="
+              }
+            ],
+            "decided": false,
+            "decision": "APPROVE",
+            "matched": true,
+            "priority": 2,
+            "rule_id": "small-amount-approve"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "0.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": false,
+                "index": 0,
+                "operator": ">"
+              }
+            ],
+            "decided": false,
+            "decision": "REJECT",
+            "matched": false,
+            "priority": 3,
+            "rule_id": "large-amount-reject"
+          }
+        ]
+      },
+      "model_expectations": [],
+      "reference": {
+        "decision": "REVIEW",
+        "error": null
+      },
+      "sources": [
+        {
+          "kind": "domain_bound",
+          "label": "schema domain lower bound (not a policy limit)"
+        }
+      ],
+      "target": {
+        "decision": "REVIEW",
+        "error": null,
+        "failure": null
+      }
+    },
+    {
+      "amount": "0.00",
+      "has_service_date": true,
+      "id": "point-0.00-dated",
+      "interpreted": {
+        "conflicting_matches": false,
+        "decided_by": "small-amount-approve",
+        "decision": "APPROVE",
+        "matching_rule_ids": [
+          "small-amount-approve"
+        ],
+        "status": "DECIDED",
+        "trace": [
+          {
+            "conditions": [
+              {
+                "actual": true,
+                "expected": false,
+                "field": "has_service_date",
+                "holds": false,
+                "index": 0,
+                "operator": "=="
+              }
+            ],
+            "decided": false,
+            "decision": "REVIEW",
+            "matched": false,
+            "priority": 1,
+            "rule_id": "missing-date-review"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "0.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": true,
+                "index": 0,
+                "operator": "<="
+              }
+            ],
+            "decided": true,
+            "decision": "APPROVE",
+            "matched": true,
+            "priority": 2,
+            "rule_id": "small-amount-approve"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "0.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": false,
+                "index": 0,
+                "operator": ">"
+              }
+            ],
+            "decided": false,
+            "decision": "REJECT",
+            "matched": false,
+            "priority": 3,
+            "rule_id": "large-amount-reject"
+          }
+        ]
+      },
+      "model_expectations": [],
+      "reference": {
+        "decision": "APPROVE",
+        "error": null
+      },
+      "sources": [
+        {
+          "kind": "domain_bound",
+          "label": "schema domain lower bound (not a policy limit)"
+        }
+      ],
+      "target": {
+        "decision": "APPROVE",
+        "error": null,
+        "failure": null
+      }
+    },
+    {
+      "amount": "39.99",
+      "has_service_date": false,
+      "id": "point-39.99-undated",
+      "interpreted": {
+        "conflicting_matches": true,
+        "decided_by": "missing-date-review",
+        "decision": "REVIEW",
+        "matching_rule_ids": [
+          "missing-date-review",
+          "small-amount-approve"
+        ],
+        "status": "DECIDED",
+        "trace": [
+          {
+            "conditions": [
+              {
+                "actual": false,
+                "expected": false,
+                "field": "has_service_date",
+                "holds": true,
+                "index": 0,
+                "operator": "=="
+              }
+            ],
+            "decided": true,
+            "decision": "REVIEW",
+            "matched": true,
+            "priority": 1,
+            "rule_id": "missing-date-review"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "39.99",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": true,
+                "index": 0,
+                "operator": "<="
+              }
+            ],
+            "decided": false,
+            "decision": "APPROVE",
+            "matched": true,
+            "priority": 2,
+            "rule_id": "small-amount-approve"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "39.99",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": false,
+                "index": 0,
+                "operator": ">"
+              }
+            ],
+            "decided": false,
+            "decision": "REJECT",
+            "matched": false,
+            "priority": 3,
+            "rule_id": "large-amount-reject"
+          }
+        ]
+      },
+      "model_expectations": [
+        {
+          "case_id": "tc-below-without-date",
+          "expected_decision": "REVIEW",
+          "rule_id": "missing-date-review"
+        }
+      ],
+      "reference": {
+        "decision": "REVIEW",
+        "error": null
+      },
+      "sources": [
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "-0.01",
+          "rule_id": "small-amount-approve",
+          "threshold": "40.00"
+        },
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "-0.01",
+          "rule_id": "large-amount-reject",
+          "threshold": "40.00"
+        },
+        {
+          "kind": "policy_text_amount",
+          "label": "extra: policy text $40.00 at [227, 233), $40.00 at [292, 298)",
+          "offset": "-0.01",
+          "threshold": "40.00"
+        },
+        {
+          "case_id": "tc-below-without-date",
+          "kind": "model_test_case"
+        }
+      ],
+      "target": {
+        "decision": "REVIEW",
+        "error": null,
+        "failure": null
+      }
+    },
+    {
+      "amount": "39.99",
+      "has_service_date": true,
+      "id": "point-39.99-dated",
+      "interpreted": {
+        "conflicting_matches": false,
+        "decided_by": "small-amount-approve",
+        "decision": "APPROVE",
+        "matching_rule_ids": [
+          "small-amount-approve"
+        ],
+        "status": "DECIDED",
+        "trace": [
+          {
+            "conditions": [
+              {
+                "actual": true,
+                "expected": false,
+                "field": "has_service_date",
+                "holds": false,
+                "index": 0,
+                "operator": "=="
+              }
+            ],
+            "decided": false,
+            "decision": "REVIEW",
+            "matched": false,
+            "priority": 1,
+            "rule_id": "missing-date-review"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "39.99",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": true,
+                "index": 0,
+                "operator": "<="
+              }
+            ],
+            "decided": true,
+            "decision": "APPROVE",
+            "matched": true,
+            "priority": 2,
+            "rule_id": "small-amount-approve"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "39.99",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": false,
+                "index": 0,
+                "operator": ">"
+              }
+            ],
+            "decided": false,
+            "decision": "REJECT",
+            "matched": false,
+            "priority": 3,
+            "rule_id": "large-amount-reject"
+          }
+        ]
+      },
+      "model_expectations": [
+        {
+          "case_id": "tc-below-with-date",
+          "expected_decision": "APPROVE",
+          "rule_id": "small-amount-approve"
+        }
+      ],
+      "reference": {
+        "decision": "APPROVE",
+        "error": null
+      },
+      "sources": [
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "-0.01",
+          "rule_id": "small-amount-approve",
+          "threshold": "40.00"
+        },
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "-0.01",
+          "rule_id": "large-amount-reject",
+          "threshold": "40.00"
+        },
+        {
+          "kind": "policy_text_amount",
+          "label": "extra: policy text $40.00 at [227, 233), $40.00 at [292, 298)",
+          "offset": "-0.01",
+          "threshold": "40.00"
+        },
+        {
+          "case_id": "tc-below-with-date",
+          "kind": "model_test_case"
+        }
+      ],
+      "target": {
+        "decision": "APPROVE",
+        "error": null,
+        "failure": null
+      }
+    },
+    {
+      "amount": "40.00",
+      "has_service_date": false,
+      "id": "point-40.00-undated",
+      "interpreted": {
+        "conflicting_matches": true,
+        "decided_by": "missing-date-review",
+        "decision": "REVIEW",
+        "matching_rule_ids": [
+          "missing-date-review",
+          "small-amount-approve"
+        ],
+        "status": "DECIDED",
+        "trace": [
+          {
+            "conditions": [
+              {
+                "actual": false,
+                "expected": false,
+                "field": "has_service_date",
+                "holds": true,
+                "index": 0,
+                "operator": "=="
+              }
+            ],
+            "decided": true,
+            "decision": "REVIEW",
+            "matched": true,
+            "priority": 1,
+            "rule_id": "missing-date-review"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "40.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": true,
+                "index": 0,
+                "operator": "<="
+              }
+            ],
+            "decided": false,
+            "decision": "APPROVE",
+            "matched": true,
+            "priority": 2,
+            "rule_id": "small-amount-approve"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "40.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": false,
+                "index": 0,
+                "operator": ">"
+              }
+            ],
+            "decided": false,
+            "decision": "REJECT",
+            "matched": false,
+            "priority": 3,
+            "rule_id": "large-amount-reject"
+          }
+        ]
+      },
+      "model_expectations": [
+        {
+          "case_id": "tc-at-without-date",
+          "expected_decision": "REVIEW",
+          "rule_id": "missing-date-review"
+        }
+      ],
+      "reference": {
+        "decision": "REVIEW",
+        "error": null
+      },
+      "sources": [
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "0.00",
+          "rule_id": "small-amount-approve",
+          "threshold": "40.00"
+        },
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "0.00",
+          "rule_id": "large-amount-reject",
+          "threshold": "40.00"
+        },
+        {
+          "kind": "policy_text_amount",
+          "label": "extra: policy text $40.00 at [227, 233), $40.00 at [292, 298)",
+          "offset": "0.00",
+          "threshold": "40.00"
+        },
+        {
+          "case_id": "tc-at-without-date",
+          "kind": "model_test_case"
+        }
+      ],
+      "target": {
+        "decision": "REVIEW",
+        "error": null,
+        "failure": null
+      }
+    },
+    {
+      "amount": "40.00",
+      "has_service_date": true,
+      "id": "point-40.00-dated",
+      "interpreted": {
+        "conflicting_matches": false,
+        "decided_by": "small-amount-approve",
+        "decision": "APPROVE",
+        "matching_rule_ids": [
+          "small-amount-approve"
+        ],
+        "status": "DECIDED",
+        "trace": [
+          {
+            "conditions": [
+              {
+                "actual": true,
+                "expected": false,
+                "field": "has_service_date",
+                "holds": false,
+                "index": 0,
+                "operator": "=="
+              }
+            ],
+            "decided": false,
+            "decision": "REVIEW",
+            "matched": false,
+            "priority": 1,
+            "rule_id": "missing-date-review"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "40.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": true,
+                "index": 0,
+                "operator": "<="
+              }
+            ],
+            "decided": true,
+            "decision": "APPROVE",
+            "matched": true,
+            "priority": 2,
+            "rule_id": "small-amount-approve"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "40.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": false,
+                "index": 0,
+                "operator": ">"
+              }
+            ],
+            "decided": false,
+            "decision": "REJECT",
+            "matched": false,
+            "priority": 3,
+            "rule_id": "large-amount-reject"
+          }
+        ]
+      },
+      "model_expectations": [
+        {
+          "case_id": "tc-at-with-date",
+          "expected_decision": "APPROVE",
+          "rule_id": "small-amount-approve"
+        }
+      ],
+      "reference": {
+        "decision": "APPROVE",
+        "error": null
+      },
+      "sources": [
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "0.00",
+          "rule_id": "small-amount-approve",
+          "threshold": "40.00"
+        },
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "0.00",
+          "rule_id": "large-amount-reject",
+          "threshold": "40.00"
+        },
+        {
+          "kind": "policy_text_amount",
+          "label": "extra: policy text $40.00 at [227, 233), $40.00 at [292, 298)",
+          "offset": "0.00",
+          "threshold": "40.00"
+        },
+        {
+          "case_id": "tc-at-with-date",
+          "kind": "model_test_case"
+        }
+      ],
+      "target": {
+        "decision": "REJECT",
+        "error": null,
+        "failure": null
+      }
+    },
+    {
+      "amount": "40.01",
+      "has_service_date": false,
+      "id": "point-40.01-undated",
+      "interpreted": {
+        "conflicting_matches": true,
+        "decided_by": "missing-date-review",
+        "decision": "REVIEW",
+        "matching_rule_ids": [
+          "missing-date-review",
+          "large-amount-reject"
+        ],
+        "status": "DECIDED",
+        "trace": [
+          {
+            "conditions": [
+              {
+                "actual": false,
+                "expected": false,
+                "field": "has_service_date",
+                "holds": true,
+                "index": 0,
+                "operator": "=="
+              }
+            ],
+            "decided": true,
+            "decision": "REVIEW",
+            "matched": true,
+            "priority": 1,
+            "rule_id": "missing-date-review"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "40.01",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": false,
+                "index": 0,
+                "operator": "<="
+              }
+            ],
+            "decided": false,
+            "decision": "APPROVE",
+            "matched": false,
+            "priority": 2,
+            "rule_id": "small-amount-approve"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "40.01",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": true,
+                "index": 0,
+                "operator": ">"
+              }
+            ],
+            "decided": false,
+            "decision": "REJECT",
+            "matched": true,
+            "priority": 3,
+            "rule_id": "large-amount-reject"
+          }
+        ]
+      },
+      "model_expectations": [
+        {
+          "case_id": "tc-above-without-date",
+          "expected_decision": "REVIEW",
+          "rule_id": "missing-date-review"
+        }
+      ],
+      "reference": {
+        "decision": "REVIEW",
+        "error": null
+      },
+      "sources": [
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "0.01",
+          "rule_id": "small-amount-approve",
+          "threshold": "40.00"
+        },
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "0.01",
+          "rule_id": "large-amount-reject",
+          "threshold": "40.00"
+        },
+        {
+          "kind": "policy_text_amount",
+          "label": "extra: policy text $40.00 at [227, 233), $40.00 at [292, 298)",
+          "offset": "0.01",
+          "threshold": "40.00"
+        },
+        {
+          "case_id": "tc-above-without-date",
+          "kind": "model_test_case"
+        }
+      ],
+      "target": {
+        "decision": "REVIEW",
+        "error": null,
+        "failure": null
+      }
+    },
+    {
+      "amount": "40.01",
+      "has_service_date": true,
+      "id": "point-40.01-dated",
+      "interpreted": {
+        "conflicting_matches": false,
+        "decided_by": "large-amount-reject",
+        "decision": "REJECT",
+        "matching_rule_ids": [
+          "large-amount-reject"
+        ],
+        "status": "DECIDED",
+        "trace": [
+          {
+            "conditions": [
+              {
+                "actual": true,
+                "expected": false,
+                "field": "has_service_date",
+                "holds": false,
+                "index": 0,
+                "operator": "=="
+              }
+            ],
+            "decided": false,
+            "decision": "REVIEW",
+            "matched": false,
+            "priority": 1,
+            "rule_id": "missing-date-review"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "40.01",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": false,
+                "index": 0,
+                "operator": "<="
+              }
+            ],
+            "decided": false,
+            "decision": "APPROVE",
+            "matched": false,
+            "priority": 2,
+            "rule_id": "small-amount-approve"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "40.01",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": true,
+                "index": 0,
+                "operator": ">"
+              }
+            ],
+            "decided": true,
+            "decision": "REJECT",
+            "matched": true,
+            "priority": 3,
+            "rule_id": "large-amount-reject"
+          }
+        ]
+      },
+      "model_expectations": [
+        {
+          "case_id": "tc-above-with-date",
+          "expected_decision": "REJECT",
+          "rule_id": "large-amount-reject"
+        }
+      ],
+      "reference": {
+        "decision": "REJECT",
+        "error": null
+      },
+      "sources": [
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "0.01",
+          "rule_id": "small-amount-approve",
+          "threshold": "40.00"
+        },
+        {
+          "condition_index": 0,
+          "kind": "rule_threshold",
+          "offset": "0.01",
+          "rule_id": "large-amount-reject",
+          "threshold": "40.00"
+        },
+        {
+          "kind": "policy_text_amount",
+          "label": "extra: policy text $40.00 at [227, 233), $40.00 at [292, 298)",
+          "offset": "0.01",
+          "threshold": "40.00"
+        },
+        {
+          "case_id": "tc-above-with-date",
+          "kind": "model_test_case"
+        }
+      ],
+      "target": {
+        "decision": "REJECT",
+        "error": null,
+        "failure": null
+      }
+    },
+    {
+      "amount": "1000000.00",
+      "has_service_date": false,
+      "id": "point-1000000.00-undated",
+      "interpreted": {
+        "conflicting_matches": true,
+        "decided_by": "missing-date-review",
+        "decision": "REVIEW",
+        "matching_rule_ids": [
+          "missing-date-review",
+          "large-amount-reject"
+        ],
+        "status": "DECIDED",
+        "trace": [
+          {
+            "conditions": [
+              {
+                "actual": false,
+                "expected": false,
+                "field": "has_service_date",
+                "holds": true,
+                "index": 0,
+                "operator": "=="
+              }
+            ],
+            "decided": true,
+            "decision": "REVIEW",
+            "matched": true,
+            "priority": 1,
+            "rule_id": "missing-date-review"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "1000000.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": false,
+                "index": 0,
+                "operator": "<="
+              }
+            ],
+            "decided": false,
+            "decision": "APPROVE",
+            "matched": false,
+            "priority": 2,
+            "rule_id": "small-amount-approve"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "1000000.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": true,
+                "index": 0,
+                "operator": ">"
+              }
+            ],
+            "decided": false,
+            "decision": "REJECT",
+            "matched": true,
+            "priority": 3,
+            "rule_id": "large-amount-reject"
+          }
+        ]
+      },
+      "model_expectations": [],
+      "reference": {
+        "decision": "REVIEW",
+        "error": null
+      },
+      "sources": [
+        {
+          "kind": "domain_bound",
+          "label": "schema domain upper bound (not a policy limit)"
+        }
+      ],
+      "target": {
+        "decision": "REVIEW",
+        "error": null,
+        "failure": null
+      }
+    },
+    {
+      "amount": "1000000.00",
+      "has_service_date": true,
+      "id": "point-1000000.00-dated",
+      "interpreted": {
+        "conflicting_matches": false,
+        "decided_by": "large-amount-reject",
+        "decision": "REJECT",
+        "matching_rule_ids": [
+          "large-amount-reject"
+        ],
+        "status": "DECIDED",
+        "trace": [
+          {
+            "conditions": [
+              {
+                "actual": true,
+                "expected": false,
+                "field": "has_service_date",
+                "holds": false,
+                "index": 0,
+                "operator": "=="
+              }
+            ],
+            "decided": false,
+            "decision": "REVIEW",
+            "matched": false,
+            "priority": 1,
+            "rule_id": "missing-date-review"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "1000000.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": false,
+                "index": 0,
+                "operator": "<="
+              }
+            ],
+            "decided": false,
+            "decision": "APPROVE",
+            "matched": false,
+            "priority": 2,
+            "rule_id": "small-amount-approve"
+          },
+          {
+            "conditions": [
+              {
+                "actual": "1000000.00",
+                "expected": "40.00",
+                "field": "amount",
+                "holds": true,
+                "index": 0,
+                "operator": ">"
+              }
+            ],
+            "decided": true,
+            "decision": "REJECT",
+            "matched": true,
+            "priority": 3,
+            "rule_id": "large-amount-reject"
+          }
+        ]
+      },
+      "model_expectations": [],
+      "reference": {
+        "decision": "REJECT",
+        "error": null
+      },
+      "sources": [
+        {
+          "kind": "domain_bound",
+          "label": "schema domain upper bound (not a policy limit)"
+        }
+      ],
+      "target": {
+        "decision": "REJECT",
+        "error": null,
+        "failure": null
+      }
+    }
+  ],
+  "policy": {
+    "characters": 313,
+    "policy_id": "democo-meal-expense-policy",
+    "sha256": "9b320c34f7f82e4a2eaf8430c9dbe39d096e322450fc6cd0c7c591522faab9ee"
+  },
+  "policy_thresholds": [
+    {
+      "amount": "40.00",
+      "spans": [
+        [
+          227,
+          233
+        ],
+        [
+          292,
+          298
+        ]
+      ]
+    }
+  ],
+  "proposal": {
+    "model_reported": "muse-spark-1.3",
+    "note": "Provenance labels come from the call path or the saved response file. They are not cryptographic proof of origin. model_reported is whatever model name the response states.",
+    "provenance": "LIVE: Muse Spark API response (muse-spark-1.3, response id resp_6ae63743a8b7a612db3b4fc2)",
+    "provenance_label": "LIVE",
+    "response_id": "resp_6ae63743a8b7a612db3b4fc2"
+  },
+  "reference": {
+    "description": "Human-written synthetic reference for the fictional DemoCo meal policy (src/policyproof/reference.py). It encodes the same missing-date precedence assumption as the rules, so it is one interpretation, not ground truth.",
+    "name": "democo-meal-reference"
+  },
+  "report_version": "1",
+  "rules": [
+    {
+      "conditions": [
+        {
+          "field": "has_service_date",
+          "operator": "==",
+          "value": false
+        }
+      ],
+      "decision": "REVIEW",
+      "description": "Assumption: Missing service date takes precedence over amount rules; claims without a service date require manual review regardless of amount.",
+      "evidence": {
+        "quote": "Claims without a service date must be sent for manual review.",
+        "span": [
+          146,
+          207
+        ]
+      },
+      "id": "missing-date-review",
+      "priority": 1
+    },
+    {
+      "conditions": [
+        {
+          "field": "amount",
+          "operator": "<=",
+          "value": "40.00"
+        }
+      ],
+      "decision": "APPROVE",
+      "description": "Assumption: This amount rule applies after the service-date check; claims at or below threshold are approved when the prior rule does not apply.",
+      "evidence": {
+        "quote": "Meal claims of $40.00 or less are approved automatically.",
+        "span": [
+          212,
+          269
+        ]
+      },
+      "id": "small-amount-approve",
+      "priority": 2
+    },
+    {
+      "conditions": [
+        {
+          "field": "amount",
+          "operator": ">",
+          "value": "40.00"
+        }
+      ],
+      "decision": "REJECT",
+      "description": "Assumption: This amount rule applies after the service-date check; claims above threshold are rejected when prior rules do not apply.",
+      "evidence": {
+        "quote": "Meal claims above $40.00 are rejected.",
+        "span": [
+          274,
+          312
+        ]
+      },
+      "id": "large-amount-reject",
+      "priority": 3
+    }
+  ],
+  "semantics": "Rules are evaluated in ascending priority; a rule matches when all of its conditions hold; the first matching rule decides; no match means no decision.",
+  "target": {
+    "description": "Deliberately buggy DemoCo engine (examples/buggy_engine.py).",
+    "name": "democo-buggy-engine"
+  },
+  "target_execution": {
+    "calls": 1510,
+    "import_path": "examples.buggy_engine:evaluate_meal_claim",
+    "mode": "isolated-worker-process",
+    "not_run": 0,
+    "note": "Each call ran in a separate worker process and was abandoned, with the worker killed, if it did not answer within the timeout. This is process isolation with a timeout, not a security sandbox: the worker has the user's permissions.",
+    "time_limit_seconds": 120.0,
+    "timeout_seconds": 2.0,
+    "timeouts": 0,
+    "worker_crashes": 0,
+    "worker_starts": 1
+  },
+  "target_search": {
+    "bisection_calls": 0,
+    "budget": 2000,
+    "budget_exhausted": false,
+    "comparison_basis": "independent reference",
+    "limitations": [
+      "Sampling, not exhaustive checking: faults at a few isolated amounts can be missed.",
+      "Inside a reported range only the listed evaluated amounts were checked; the range may contain agreeing amounts that were never sampled.",
+      "Edges marked verified were evaluated on both sides; any other edge is given as an interval.",
+      "How target calls were run (in-process, or a worker process with a per-call timeout) is stated under target_execution; neither is a security sandbox."
+    ],
+    "performed": true,
+    "probe_calls": 1500,
+    "proposed_amounts": {
+      "used": false
+    },
+    "ranges_found": 0,
+    "reference_calls": 1500,
+    "seed": 20261104,
+    "source_amounts": {
+      "amounts": [],
+      "note": "Amounts written in the target's own source, probed with one cent either side before the ladder. The source was parsed, never executed; a probe is evidence only through the decisions actually observed there.",
+      "read_from": null,
+      "unavailable": "source could not be parsed: invalid non-printable character U+FEFF (<unknown>, line 1)",
+      "used": true
+    },
+    "strategy": "For each value of has_service_date: amounts written in the target's source and one cent either side (when enabled), then a round-number ladder (1, 2, 2.5 and 5 x 10^k dollars and one cent either side), then seeded samples spread over power-of-ten bands between neighbouring evaluated amounts, then bisection to one cent at the edges of every range. 1/4 of the budget is reserved for bisection.",
+    "target_calls": 1500,
+    "unjudged_evaluations": 0
+  },
+  "tool": "PolicyProof",
+  "verification": {
+    "criteria": {
+      "L0": {
+        "detail": "The rules passed schema validation and evidence grounding, and the interpreter supports every construct they use.",
+        "met": true
+      },
+      "L1": {
+        "detail": "10 points executed; 0 without a decision; 6 of 6 model expectations agree; 5 precedence-dependent point(s) reported.",
+        "met": true
+      },
+      "L2": {
+        "detail": "interpreted rules and reference agree at every evaluated point",
+        "met": true
+      },
+      "L3": {
+        "detail": "target does not agree with the reference at every evaluated point",
+        "met": false
+      }
+    },
+    "level": "L2",
+    "level_meaning": "The highest level whose criteria, and those of every lower level, are met. Levels say how far the evidence chain reaches; they are not a quality grade, and none of them establishes semantic correctness of the rules or the target.",
+    "not_established": [
+      "that the rules interpret the policy as its author intended (semantic correctness)",
+      "that the reference matches the policy author's intent; it is one human reading",
+      "behaviour of the reference or target at inputs between the evaluated points",
+      "thresholds the policy expresses other than as \"$\" amounts",
+      "the origin of the proposal beyond its self-reported provenance label"
+    ],
+    "result": {
+      "exit_code": 3,
+      "label": "FAILED",
+      "meaning": "error findings: a confirmed target discrepancy, a defect in the proposal, or part of the verification that could not run"
+    },
+    "scope": "Results cover 10 evaluated points: boundary points derived from the rules' amount thresholds, \"$\" amounts found in the policy text, and the proposal's own test cases, inside the schema domain for both values of has_service_date. For the rule document these points show every distinct behaviour it has. For the reference and the target, agreement holds at these points only. In addition, the target was called at 1500 amounts chosen by a seeded search (seed 20261104, budget 2000) between those points; that is sampling, not exhaustive checking."
+  }
+}

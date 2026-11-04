@@ -1,0 +1,63 @@
+{
+  "top_logprobs": 0,
+  "temperature": 1.0,
+  "top_p": 1.0,
+  "service_tier": "auto",
+  "model": "muse-spark-1.3",
+  "reasoning": {
+    "effort": "high"
+  },
+  "background": false,
+  "tools": [],
+  "tool_choice": "auto",
+  "truncation": "disabled",
+  "id": "resp_6ae63743a8b7a612db3b4fc2",
+  "object": "response",
+  "status": "completed",
+  "created_at": 1793472323.0,
+  "completed_at": 1793472323.0,
+  "error": null,
+  "incomplete_details": null,
+  "output": [
+    {
+      "type": "reasoning",
+      "id": "rs_6ae63743a8b7a612db3b4fc2:rs_62767f4e-51c4-4502-9528-4b55ba692e26",
+      "summary": [],
+      "status": "completed"
+    },
+    {
+      "type": "message",
+      "id": "msg_ddb81485-68fd-44e2-a6b0-c8d89a8f9850",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"schema_version\": \"1.0\", \"policy_id\": \"democo-meal-expense-policy\", \"rules\": [{\"id\": \"missing-date-review\", \"description\": \"Assumption: Missing service date takes precedence over amount rules; claims without a service date require manual review regardless of amount.\", \"priority\": 1, \"conditions\": [{\"field\": \"has_service_date\", \"operator\": \"==\", \"value\": false}], \"decision\": \"REVIEW\", \"evidence\": \"Claims without a service date must be sent for manual review.\"}, {\"id\": \"small-amount-approve\", \"description\": \"Assumption: This amount rule applies after the service-date check; claims at or below threshold are approved when the prior rule does not apply.\", \"priority\": 2, \"conditions\": [{\"field\": \"amount\", \"operator\": \"<=\", \"value\": 40}], \"decision\": \"APPROVE\", \"evidence\": \"Meal claims of $40.00 or less are approved automatically.\"}, {\"id\": \"large-amount-reject\", \"description\": \"Assumption: This amount rule applies after the service-date check; claims above threshold are rejected when prior rules do not apply.\", \"priority\": 3, \"conditions\": [{\"field\": \"amount\", \"operator\": \">\", \"value\": 40}], \"decision\": \"REJECT\", \"evidence\": \"Meal claims above $40.00 are rejected.\"}], \"test_cases\": [{\"id\": \"tc-below-with-date\", \"inputs\": {\"amount\": 39.99, \"has_service_date\": true}, \"expected_decision\": \"APPROVE\", \"rule_id\": \"small-amount-approve\", \"rationale\": \"39.99 is one cent below 40.00 with service date, so amount rule approves.\"}, {\"id\": \"tc-below-without-date\", \"inputs\": {\"amount\": 39.99, \"has_service_date\": false}, \"expected_decision\": \"REVIEW\", \"rule_id\": \"missing-date-review\", \"rationale\": \"39.99 is below threshold but missing service date takes precedence and requires review.\"}, {\"id\": \"tc-at-with-date\", \"inputs\": {\"amount\": 40, \"has_service_date\": true}, \"expected_decision\": \"APPROVE\", \"rule_id\": \"small-amount-approve\", \"rationale\": \"40 exactly at threshold with service date must be approved.\"}, {\"id\": \"tc-at-without-date\", \"inputs\": {\"amount\": 40, \"has_service_date\": false}, \"expected_decision\": \"REVIEW\", \"rule_id\": \"missing-date-review\", \"rationale\": \"40 exactly at threshold but missing service date takes precedence and requires review.\"}, {\"id\": \"tc-above-with-date\", \"inputs\": {\"amount\": 40.01, \"has_service_date\": true}, \"expected_decision\": \"REJECT\", \"rule_id\": \"large-amount-reject\", \"rationale\": \"40.01 is one cent above 40.00 with service date, so amount rule rejects.\"}, {\"id\": \"tc-above-without-date\", \"inputs\": {\"amount\": 40.01, \"has_service_date\": false}, \"expected_decision\": \"REVIEW\", \"rule_id\": \"missing-date-review\", \"rationale\": \"40.01 is above threshold but missing service date takes precedence and requires review.\"}]}",
+          "annotations": [],
+          "logprobs": []
+        }
+      ],
+      "status": "completed"
+    }
+  ],
+  "instructions": null,
+  "usage": {
+    "input_tokens": 669,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 9419,
+    "output_tokens_details": {
+      "reasoning_tokens": 8697
+    },
+    "total_tokens": 10088
+  },
+  "parallel_tool_calls": true,
+  "store": true,
+  "_policyproof_recording": {
+    "source": "live Muse Spark API call made by PolicyProof",
+    "saved_at": "2026-10-31T18:45:23+00:00",
+    "endpoint": "https://api.meta.ai/v1/responses",
+    "model": "muse-spark-1.3"
+  }
+}

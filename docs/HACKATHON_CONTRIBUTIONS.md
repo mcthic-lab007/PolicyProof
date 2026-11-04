@@ -30,7 +30,7 @@ What was built for the Meta Global AI Developer Hackathon (2026-10-26 to 2026-11
 **What remains uncertain:**
 - File creation times are file-system metadata. Copying or restoring a file can change them, so they corroborate but do not prove.
 - The planning documents' save times are the only independent record of when they were written. Their embedded metadata is a library default and carries no information.
-- **Who or what wrote the prototype is not recorded.** It was not written in Claude Code. The 17:38 write-up describes it as "code created in this session", which suggests an assistant chat session. Before submission, the author should name the tool here.
+- **Who or what wrote the prototype is not recorded.** It was not written in Claude Code. The 17:38 write-up describes it as "code created in this session", which suggests an assistant chat session. Before submission, the author should name the tool here. *(Still unresolved at the 2026-11-04 release: the repository does not name it, and the 2026-10-28 search of records outside Git found nothing that does.)*
 
 ## Contribution inventory
 
@@ -67,8 +67,9 @@ What was built for the Meta Global AI Developer Hackathon (2026-10-26 to 2026-11
 | 27 | Muse harness cost guard and E+G+H scoring | `018b5ee` (11-01), before any call | Per-call `max_output_tokens` from the remaining budget, ledger, stop rules, no retry; v3 call order; methods EGH and EGHM | `tests/test_muse_probes.py` (fake transport); used for the six live calls below |
 | 28 | Method H correction | `c4a0694` (11-01) | Root cause: the shared `ast.Load` object was marked as part of a `Decimal(100)` factor. H now also declines (with a recorded reason) percentages and cents names used as dollars | `tests/test_h_correction.py` (10 tests) and one rewritten test; development evidence only |
 | 29 | Generalization corpus g2 for the corrected H (frozen before measurement) | `3853910` (11-01); results in the next commit | 24 new targets: Decimal-scaled cents, plain cents, G layouts, abstain cases, controls; exhaustive ground truth; hashes, predictions, old-H ablation and nine criteria committed before measurement | `tests/test_benchmark_g2.py`; all nine criteria pass, every prediction held ([BENCHMARK.md](BENCHMARK.md)) |
+| 30 | Release integration and published live evidence | `d810bae`, `a955f41` (11-04, merges), then the documentation commit on `release/final` | Merged rows 21–29 and 23–24 for release; copied the nine saved live responses, reviewed for keys and personal data, into `evidence/live/` with SHA-256 hashes; README results table and storyboard brought up to the measured figures | 520 tests pass; v2, v3 and g2 benchmark fingerprints re-run on the release commit and equal to the saved ones (see DAILY_LOG.md, 2026-11-04) |
 
-Merge commits (`9dcfe54`, `5cc0f07`, `129433b`, `b2f75b9`, `7918fcb`, `7921aa3`, `e48006d`, `451e83b`, `2dee2a6`, `9a3adb1`, `ba916b8`, `c01da1b`, `68118fe`; the full list from `git log --merges master`) integrate the feature branches above and add no code of their own.
+Merge commits (`9dcfe54`, `5cc0f07`, `129433b`, `b2f75b9`, `7918fcb`, `7921aa3`, `e48006d`, `451e83b`, `2dee2a6`, `9a3adb1`, `ba916b8`, `c01da1b`, `68118fe`, `d810bae`, `a955f41`; the full list from `git log --merges master`) integrate the feature branches above and add no code of their own.
 
 ## Meta model usage: what Muse Spark does and what it does not
 
@@ -97,7 +98,7 @@ Merge commits (`9dcfe54`, `5cc0f07`, `129433b`, `b2f75b9`, `7918fcb`, `7921aa3`,
   - Saved, git-ignored, under `artifacts/muse_probes_v3/` with prompts, usage and a cost ledger. Scored offline as `REPLAY_SAVED_LIVE_RESPONSE`.
   - Muse proposed the one-cent loop amount $1,500.07 and the rounding-window edges $2,007.49 and $2,008.57, which E+G+H does not generate. PolicyProof confirmed both defects by running the target and the reference: v3 detection went from 17/21 to 19/21, with 0/10 false accusations.
   - These rest on one response per target.
-- **Live call count:** nine in total, each with its saved response in the git-ignored `artifacts/` directory (nine distinct response ids, checked 2026-11-04): 2026-10-27 rule proposals (`muse_live_001`); 2026-10-31 probe pilot; 2026-10-31 live verification run (`muse_live_002`); and the six v3 probe calls on 2026-11-01. Every other Muse result in this repository or its artifacts is a labelled replay or the synthetic fixture. The manual smoke test mentioned in the 2026-10-27 planning notes predates the repository and its output is not saved here.
+- **Live call count:** nine in total, each with its saved response in the git-ignored `artifacts/` directory (nine distinct response ids, checked 2026-11-04). Byte-identical copies of all nine, reviewed for keys and personal data, are published in [`evidence/live/`](../evidence/live/) with their SHA-256 hashes. The calls: 2026-10-27 rule proposals (`muse_live_001`); 2026-10-31 probe pilot; 2026-10-31 live verification run (`muse_live_002`); and the six v3 probe calls on 2026-11-01. Every other Muse result in this repository or its artifacts is a labelled replay or the synthetic fixture. The manual smoke test mentioned in the 2026-10-27 planning notes predates the repository and its output is not saved here.
 - **Offline evidence:** the committed fixture is hand-written and labelled `REPLAY_SYNTHETIC`. It is not Muse output. The benchmark and offline demo use it so that anyone can reproduce them.
 
 ## Third-party dependencies and services
