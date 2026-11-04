@@ -29,6 +29,11 @@ $py = ".\.venv\Scripts\python.exe"; $pol = "examples/democo_meal_policy.txt"
   - Honest line: "Muse read the code and proposed the hidden edges; PolicyProof ran them and confirmed the range. A deterministic analyzer finds these too, so the proposal is checked, never trusted."
   - Do not say Muse finds what code analysis cannot.
 
+**Stronger candidate for the Muse beat (corpus v3, 2026-11-01):** the loop-assembled-cent engine. Muse read the code and proposed $1,500.07. No deterministic method in PolicyProof (search, source amounts, folding, G or H) produces that amount, and PolicyProof confirmed the one-cent defect by running the engine and the reference.
+- **Evidence:** response `resp_6ae73c75261e9d5dd2ef4fbd`, saved under `artifacts/muse_probes_v3/`. On screen it is a replay of a saved live response and must be labelled REPLAY, unless a new live call is authorized and recorded.
+- **Honest line:** "Muse proposed a cent our analyzers don't compute; PolicyProof ran it and confirmed the bug. The proposal was checked, not trusted."
+- **Don't say** this proves Muse is generally better: it is one response per target, on synthetic engines.
+
 ## Before recording
 
 - [ ] **Live take:** `META_MUSE_API_KEY` set in the recording shell only; not on screen, not in history and not in the report. Check that the first output line reads `LIVE:`.

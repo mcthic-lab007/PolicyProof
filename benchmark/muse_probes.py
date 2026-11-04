@@ -38,6 +38,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from benchmark import run as bench
+from benchmark import corpus as corpus_v2, corpus_v3
 from benchmark.corpus import CASES, CORPUS_VERSION, CORRECT, DEFECT
 from src.policyproof.muse_client import (
     FIXTURE_NOTE_KEY,
@@ -57,6 +58,10 @@ from src.policyproof.source_literals import source_excerpt
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DIR = ROOT / "artifacts" / "muse_probes"
+DEFAULT_DIR_V3 = ROOT / "artifacts" / "muse_probes_v3"
+# Targets `record` asks Muse about: all corpus targets for v2; for v3 only the
+# targets new in v3, so v2 evidence is never re-recorded or mixed in.
+RECORD_CASES = CASES
 # Git-ignored; read only by the live `record` command, only for META_MUSE_API_KEY.
 DOTENV = ROOT / ".env"
 INPUT_KEY = "_policyproof_probe_input"
@@ -133,21 +138,94 @@ def parse_proposals(body: dict) -> tuple[tuple[Decimal, ...], list[str]]:
     return tuple(sorted(amounts)), issues
 
 
+# --------------------------------------------------------------- cost guard
+# Prices recorded 2026-10-28 (Meta's muse-spark-1.3 standard mode), USD per
+# million tokens; reasoning tokens are counted inside output_tokens and
+# assumed billed as output. Estimates, not invoices.
+PRICE_INPUT, PRICE_CACHED, PRICE_OUTPUT = Decimal("1.25"), Decimal("0.15"), Decimal("4.25")
+MILLION = Decimal(1_000_000)
+LEDGER = "cost-ledger.json"
+# v3 order, most informative first, so a budget stop loses the least.
+V3_ORDER = ("benchmark.targets_v3:loop_assembled_cent", "benchmark.targets_v3:converted_rounding_window",
+            "benchmark.targets_v3:imported_constant_cent", "benchmark.targets_v3:helper_computed_range",
+            "benchmark.targets_v3:encoded_string_range", "benchmark.targets_v3:integer_cents_table",
+            "benchmark.targets_v3:correct_quantized", "benchmark.targets_v3:correct_config_string")
+
+
+class BudgetStop(Exception):
+    """No further call: the next one could exceed the approved budget, or
+    usage could not be tracked."""
+
+
+def call_cost(usage: dict) -> Decimal:
+    """Estimated USD for one response's usage record."""
+    cached = int((usage.get("input_tokens_details") or {}).get("cached_tokens") or 0)
+    fresh = int(usage["input_tokens"]) - cached
+    return (fresh * PRICE_INPUT + cached * PRICE_CACHED + int(usage["output_tokens"]) * PRICE_OUTPUT) / MILLION
+
+
+def input_bound(prompt: str) -> int:
+    """A conservative input-token bound: one token per two UTF-8 bytes
+    (observed: about 4.2 characters per token)."""
+    return -(-len(prompt.encode("utf-8")) // 2)
+
+
+def output_cap(spent: Decimal, budget: Decimal, prompt: str, ceiling: int) -> int:
+    """The most output tokens the remaining budget pays for, at most ``ceiling``."""
+    left = budget - spent - input_bound(prompt) * PRICE_INPUT / MILLION
+    return max(0, min(ceiling, int(left * MILLION / PRICE_OUTPUT)))
+
+
+def _ordered(known: dict[str, str]) -> list[tuple[str, str]]:
+    if CORPUS_VERSION == "3":
+        return sorted(known.items(), key=lambda item: (V3_ORDER.index(item[0]) if item[0] in V3_ORDER
+                                                       else len(V3_ORDER), item[0]))
+    return list(known.items())
+
+
 def targets() -> dict[str, str]:
     """Distinct target import paths in the corpus, with a file-safe name each."""
-    specs = sorted({case.target for case in CASES})
+    specs = sorted({case.target for case in RECORD_CASES})
     return {spec: re.sub(r"[^a-z0-9]+", "-", spec.lower()).strip("-") for spec in specs}
 
 
 def record(client: MuseClient, policy_text: str, out_dir: Path, trials: int,
-           only: str | None = None) -> list[Path]:
+           only: str | None = None, budget_usd: Decimal | None = None,
+           max_output_tokens: int = 6000, min_output_tokens: int = 3000,
+           report=lambda line: None) -> list[Path]:
     """LIVE calls: one per target and trial (``only``: that target alone, for
-    a pilot). Existing files are never replaced."""
+    a pilot). Existing files are never replaced.
+
+    With ``budget_usd``, every call is bounded: its max_output_tokens is what
+    the budget left (after past calls in the ledger and a conservative input
+    bound) pays for, at most ``max_output_tokens``; no call is made when that
+    is below ``min_output_tokens``. After each call its usage and estimated
+    cost go to the ledger, and the run stops (BudgetStop, no further call) if
+    usage is missing, the cap was not echoed or was exceeded, or the budget
+    is spent. An API error is recorded and stops the run; nothing is retried."""
     known = targets()
     if only is not None and only not in known:
         raise ValueError(f"unknown target {only!r}; corpus targets: {', '.join(known)}")
     saved = []
-    for spec, name in known.items():
+    ledger_path = out_dir / LEDGER
+    ledger = (json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else
+              {"budget_usd": None, "prices_usd_per_million": {"input": str(PRICE_INPUT),
+               "cached_input": str(PRICE_CACHED), "output": str(PRICE_OUTPUT)}, "calls": []})
+    spent = sum((Decimal(c["cost_usd"]) for c in ledger["calls"] if c.get("cost_usd")), Decimal(0))
+    if budget_usd is not None:
+        ledger["budget_usd"] = str(budget_usd)
+
+    def log(entry: dict) -> None:
+        ledger["calls"].append(entry)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
+
+    def stop(reason: str):
+        error = BudgetStop(f"{reason}; no further call was made")
+        error.saved = saved
+        return error
+
+    for spec, name in _ordered(known):
         if only is not None and spec != only:
             continue
         code = source_excerpt(bench._import(spec)) if _importable(spec) else None
@@ -158,15 +236,52 @@ def record(client: MuseClient, policy_text: str, out_dir: Path, trials: int,
             path = out_dir / name / f"trial-{trial}.json"
             if path.exists():
                 continue
-            body = client.complete(prompt)
+            cap = None
+            if budget_usd is not None:
+                cap = output_cap(spent, budget_usd, prompt, max_output_tokens)
+                if cap < min_output_tokens:
+                    raise stop(f"budget: ${spent:.4f} of ${budget_usd} spent; the next call ({spec}) could "
+                               f"have at most {cap} output tokens, below the {min_output_tokens} minimum")
+            entry = {"target": spec, "trial": trial, "path": path.relative_to(out_dir).as_posix(),
+                     "max_output_tokens": cap, "input_token_bound": input_bound(prompt)}
+            try:
+                body = client.complete(prompt, max_output_tokens=cap)
+            except MuseClientError as exc:
+                if budget_usd is not None:
+                    log({**entry, "outcome": f"API error: {exc}", "cost_usd": None})
+                raise
             body = dict(body)
             body[INPUT_KEY] = {
                 "target": spec, "trial": trial, "corpus_version": CORPUS_VERSION,
                 "model": MODEL_ID, "prompt": prompt,
                 "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                "max_output_tokens": cap,
             }
             save_response(body, path)
             saved.append(path)
+            if budget_usd is None:
+                continue
+            usage = body.get("usage") or {}
+            entry.update(response_id=body.get("id"), model=body.get("model"), status=body.get("status"),
+                         created_at=body.get("created_at"),
+                         echoed_max_output_tokens=body.get("max_output_tokens"), usage=usage)
+            try:
+                cost = call_cost(usage)
+            except (KeyError, TypeError, ValueError):
+                log({**entry, "outcome": "usage missing", "cost_usd": None})
+                raise stop(f"{spec}: the response has no usable usage record, so spend cannot be tracked")
+            spent += cost
+            log({**entry, "outcome": "saved", "cost_usd": str(cost), "cumulative_usd": str(spent)})
+            report(f"  {path.relative_to(out_dir)}: {body.get('id')} {body.get('model')} {body.get('status')}, "
+                   f"input {usage.get('input_tokens')}, output {usage.get('output_tokens')} (cap {cap}), "
+                   f"${cost:.5f}, total ${spent:.5f}")
+            if body.get("max_output_tokens") != cap:
+                raise stop(f"{spec}: the API echoed max_output_tokens {body.get('max_output_tokens')!r}, "
+                           f"not {cap}, so the cap cannot be relied on")
+            if int(usage["output_tokens"]) > cap:
+                raise stop(f"{spec}: {usage['output_tokens']} output tokens exceed the cap {cap}")
+            if spent > budget_usd:
+                raise stop(f"budget exceeded: ${spent:.5f} > ${budget_usd}")
     return saved
 
 
@@ -228,10 +343,12 @@ def evidence_digests(directory: Path) -> dict[str, str]:
             for path in sorted(directory.glob("*/trial-*.json"))}
 
 
-# The methods of the seed sweep:
-# (name, source-amount probes, folded-constant probes, Muse probes).
-METHODS = (("A", False, False, False), ("B", True, False, False), ("C", False, False, True),
-           ("D", True, False, True), ("E", True, True, False), ("F", True, True, True))
+# The methods of the seed sweep: (name, source-amount probes, folded-constant
+# probes, string and cents probes (G and H), Muse probes).
+METHODS = (("A", False, False, False, False), ("B", True, False, False, False),
+           ("C", False, False, False, True), ("D", True, False, False, True),
+           ("E", True, True, False, False), ("F", True, True, False, True),
+           ("EGH", True, True, True, False), ("EGHM", True, True, True, True))
 METHOD_NOTES = {
     "A": "deterministic search: boundary points, ladder, seeded sampling, bisection",
     "B": "A plus amounts written in the target's source",
@@ -239,10 +356,13 @@ METHOD_NOTES = {
     "D": "A plus source amounts plus the saved Muse Spark proposals",
     "E": "B plus constant expressions folded from the target's source (deterministic, no model)",
     "F": "E plus the saved Muse Spark proposals",
+    "EGH": "E plus numbers inside strings (G) and evidence-gated integer cents (H); no model",
+    "EGHM": "EGH plus the saved Muse Spark proposals",
 }
 # (treated, control): C/A and D/B as before; E/B is what folding adds; C/E
 # compares Muse alone with deterministic folding; F/E is what Muse adds to E.
-PAIRS = (("C", "A"), ("D", "B"), ("E", "B"), ("C", "E"), ("F", "E"))
+# EGHM/EGH is what Muse adds to the strongest deterministic baseline.
+PAIRS = (("C", "A"), ("D", "B"), ("E", "B"), ("C", "E"), ("F", "E"), ("C", "EGH"), ("EGHM", "EGH"))
 MUSE_TARGET, CORRECT_CONTROL = "muse_target", "correct_control"
 
 
@@ -265,16 +385,19 @@ def _claimed(report: dict) -> list[dict]:
 
 
 def _sweep_row(case, role, method, use_source, use_constants, amounts, origin, budget, seed,
-               policy_text) -> dict:
+               policy_text, use_literals=False) -> dict:
     run = bench.run_case(case, policy_text, isolated=False, budget=budget, seed=seed,
                          source_probes=use_source, proposed_probes=amounts,
                          proposed_origin=origin if amounts else None, keep_report=True,
-                         constant_probes=use_constants)
+                         constant_probes=use_constants, string_probes=use_literals,
+                         cents_probes=use_literals)
     report = run.pop("report")
     search = report["target_search"]
     source = (search.get("source_amounts") or {}).get("amounts", []) if search["performed"] else []
     muse = (search.get("proposed_amounts") or {}).get("amounts", []) if search["performed"] else []
     folded = (search.get("constant_amounts") or {}).get("amounts", []) if search["performed"] else []
+    strings = (search.get("string_amounts") or {}).get("amounts", []) if search["performed"] else []
+    cents = (search.get("cents_amounts") or {}).get("amounts", []) if search["performed"] else []
     return {
         "case": case.id, "role": role, "method": method, "budget": budget, "seed": seed,
         "detected": run["detected"], "intervals": run["intervals"], "claimed": _claimed(report),
@@ -286,8 +409,8 @@ def _sweep_row(case, role, method, use_source, use_constants, amounts, origin, b
         "probe_calls": search.get("probe_calls", 0), "bisection_calls": search.get("bisection_calls", 0),
         "budget_exhausted": run["budget_exhausted"],
         # Origin of every probe amount; an amount from both is probed once.
-        "probes": {"source": source, "constant": folded, "muse": muse,
-                   "shared": sorted(set(source + folded) & set(muse))},
+        "probes": {"source": source, "constant": folded, "string": strings, "cents": cents, "muse": muse,
+                   "shared": sorted(set(source + folded + strings + cents) & set(muse))},
         "seconds": run["seconds"], "report_sha256": run["report_sha256"],
     }
 
@@ -348,12 +471,18 @@ def _unique_candidates(rows: list[dict]) -> list[dict]:
             continue  # no search ran (budget 0 only): nothing was probed
         e_amounts = set(f["probes"]["source"]) | set(f["probes"]["constant"])
         muse = set(f["probes"]["muse"])
-        out.append({
+        row = {
             "case": case,
             "muse_not_in_e": sorted(muse - e_amounts, key=Decimal),
             "e_not_in_muse": sorted(e_amounts - muse, key=Decimal),
             "muse_points_not_in_e": sorted(map(str, _points(muse) - _points(e_amounts)), key=Decimal),
-        })
+        }
+        m = next((r for r in rows if r["case"] == case and r["method"] == "EGHM" and r["budget"] > 0), None)
+        if m is not None:  # against the strongest deterministic baseline, E+G+H
+            egh = e_amounts | set(m["probes"]["string"]) | set(m["probes"]["cents"])
+            row["muse_not_in_egh"] = sorted(muse - egh, key=Decimal)
+            row["muse_points_not_in_egh"] = sorted(map(str, _points(muse) - _points(egh)), key=Decimal)
+        out.append(row)
     return out
 
 
@@ -396,10 +525,10 @@ def seed_sweep(trials: dict[int, dict[str, dict]], provenance: str, policy_text:
                     ids = sorted({bodies[s].get("id") for s, (a, _) in proposals.items()
                                   if set(a) & set(amounts)} - {None})
                     origin = f"Muse Spark {provenance} trial {trial} ({', '.join(ids)})"
-                    for method, use_source, use_constants, use_muse in METHODS:
+                    for method, use_source, use_constants, use_literals, use_muse in METHODS:
                         rows.append(_sweep_row(case, role, method, use_source, use_constants,
                                                amounts if use_muse else (), origin,
-                                               budget, seed, policy_text))
+                                               budget, seed, policy_text, use_literals))
         results["trials"][str(trial)] = {
             "proposals": {spec: {"response_id": bodies[spec].get("id"),
                                  "amounts": [str(a) for a in amounts], "issues": issues}
@@ -465,13 +594,15 @@ def evaluate(trials: dict[int, dict[str, dict]], provenance: str, policy_text: s
         proposals = {spec: parse_proposals(body) for spec, body in bodies.items()}
         usage = {spec: body.get("usage") for spec, body in bodies.items()}
         per_method = {}
-        for method, source_probes in (("C", False), ("D", True)):
+        for method, use_source, use_constants, use_literals in (
+                ("C", False, False, False), ("D", True, False, False), ("EGHM", True, True, True)):
             rows = []
             for case in CASES:
                 amounts, _ = proposals.get(case.target, ((), []))
                 rows.append(bench.run_case(
-                    case, policy_text, isolated=True, source_probes=source_probes,
+                    case, policy_text, isolated=True, source_probes=use_source,
                     proposed_probes=amounts, proposed_origin=f"Muse Spark {provenance} trial {trial}",
+                    constant_probes=use_constants, string_probes=use_literals, cents_probes=use_literals,
                 ))
             per_method[method] = {"summary": bench.summarize(rows), "cases": rows}
         results["trials"][str(trial)] = {
@@ -491,25 +622,52 @@ def _importable(spec: str) -> bool:
         return False
 
 
+def use_corpus(version: str) -> None:
+    """Select the ground-truth corpus for every command (and for benchmark.run's
+    scorer, which this harness calls)."""
+    global CASES, CORPUS_VERSION, RECORD_CASES
+    if version == "3":
+        CASES, CORPUS_VERSION, RECORD_CASES = corpus_v3.CASES, corpus_v3.CORPUS_VERSION, corpus_v3.NEW_CASES
+    elif version == "2":
+        CASES, CORPUS_VERSION, RECORD_CASES = corpus_v2.CASES, corpus_v2.CORPUS_VERSION, corpus_v2.CASES
+    else:
+        raise ValueError(f"unknown corpus {version!r}")
+    bench.CASES, bench.CORPUS_VERSION = CASES, CORPUS_VERSION
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
     rec = sub.add_parser("record", help="LIVE: ask Muse Spark for probe amounts and save them")
     rec.add_argument("--trials", type=int, default=3)
-    rec.add_argument("--dir", type=Path, default=DEFAULT_DIR)
+    rec.add_argument("--dir", type=Path, default=None,
+                     help="saved responses (default: artifacts/muse_probes, or muse_probes_v3 for --corpus 3)")
+    rec.add_argument("--corpus", choices=("2", "3"), default="2")
     rec.add_argument("--target", help="record this corpus target only (a pilot), e.g. "
                      "benchmark.targets:narrow_computed_range")
+    rec.add_argument("--budget-usd", default="0.10",
+                     help="estimated spend ceiling across the ledger in --dir (default 0.10)")
+    rec.add_argument("--max-output-tokens", type=int, default=6000)
+    rec.add_argument("--min-output-tokens", type=int, default=3000)
     ev = sub.add_parser("evaluate", help="OFFLINE: score saved proposals on the frozen corpus")
-    ev.add_argument("--dir", type=Path, default=DEFAULT_DIR)
+    ev.add_argument("--dir", type=Path, default=None,
+                     help="saved responses (default: artifacts/muse_probes, or muse_probes_v3 for --corpus 3)")
+    ev.add_argument("--corpus", choices=("2", "3"), default="2")
     ev.add_argument("--output", type=Path, required=True)
     ev.add_argument("--allow-synthetic", action="store_true")
     sw = sub.add_parser("sweep", help="OFFLINE: methods A-F over the same budgets and seeds")
-    sw.add_argument("--dir", type=Path, default=DEFAULT_DIR)
+    sw.add_argument("--dir", type=Path, default=None,
+                     help="saved responses (default: artifacts/muse_probes, or muse_probes_v3 for --corpus 3)")
+    sw.add_argument("--corpus", choices=("2", "3"), default="2")
     sw.add_argument("--output", type=Path, required=True, help="results JSON; a .md is written beside it")
     sw.add_argument("--allow-synthetic", action="store_true")
     sw.add_argument("--seeds", type=int, default=bench.SWEEP_SEEDS)
     sw.add_argument("--budgets", default=",".join(map(str, bench.SWEEP_BUDGETS)))
     args = parser.parse_args(argv)
+    if args.corpus == "3":  # v2 is the module default; switching only for v3 keeps callers' setup
+        use_corpus("3")
+    if args.dir is None:
+        args.dir = DEFAULT_DIR_V3 if args.corpus == "3" else DEFAULT_DIR
     policy_text = bench.POLICY.read_text(encoding="utf-8")
 
     if args.command == "record":
@@ -520,9 +678,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}; no call was made", file=sys.stderr)
             return 1
         try:
-            saved = record(client, policy_text, args.dir, args.trials, args.target)
+            budget = Decimal(args.budget_usd)
+        except InvalidOperation:
+            print("error: --budget-usd must be a number; no call was made", file=sys.stderr)
+            return 1
+        print(f"LIVE run, budget ${budget}, ledger {args.dir / LEDGER}", flush=True)
+        try:
+            saved = record(client, policy_text, args.dir, args.trials, args.target, budget,
+                           args.max_output_tokens, args.min_output_tokens,
+                           report=lambda line: print(line, flush=True))
+        except BudgetStop as exc:
+            print(f"STOPPED: {exc}", file=sys.stderr)
+            print(f"LIVE: saved {len(exc.saved)} new Muse Spark response(s) before stopping; see the ledger")
+            return 3
         except (MuseClientError, ValueError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            print(f"error: {exc}; the run stopped (no retry)", file=sys.stderr)
             return 1
         print(f"LIVE: saved {len(saved)} new Muse Spark response(s) under {args.dir}")
         for path in saved:

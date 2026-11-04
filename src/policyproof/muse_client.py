@@ -299,10 +299,14 @@ class MuseClient:
         body = self._post({"model": MODEL_ID, "input": build_prompt(policy_text)})
         return proposal_from_response(body, policy_text, source=SOURCE_LIVE)
 
-    def complete(self, prompt: str) -> dict[str, Any]:
+    def complete(self, prompt: str, max_output_tokens: int | None = None) -> dict[str, Any]:
         """Send one prompt and return the raw response body, with the same
-        error handling and key redaction as propose_rules."""
-        return self._post({"model": MODEL_ID, "input": prompt})
+        error handling and key redaction as propose_rules.
+        ``max_output_tokens`` (reasoning included) bounds the cost of the call."""
+        payload: dict[str, Any] = {"model": MODEL_ID, "input": prompt}
+        if max_output_tokens is not None:
+            payload["max_output_tokens"] = max_output_tokens
+        return self._post(payload)
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         transport = self._transport or requests.post

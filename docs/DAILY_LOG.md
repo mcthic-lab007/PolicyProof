@@ -238,3 +238,122 @@ No log was kept that day; this entry is reconstructed from the commit history on
 3. Decide how the demo presents Muse: as a proposer whose output PolicyProof checks, not as the source of a detection that E does not also make.
 
 **Commit identity (2026-10-31):** GitHub declined the push because the commits carried the author's private email. With the author's approval, the three unpushed commits were rebuilt on their identical trees with the account's noreply address, keeping messages, order and author dates. The new hashes are `c0a0fd8` (was `b60b386`), `eb79c45` (was `9f8ee66`) and `cf2eebc` (was `59b73da`). The originals are kept on the local branch `backup/muse-probe-experiment-59b73da`. `472257c` and everything earlier are unchanged.
+
+## 2026-10-31 (third session): push identity, merges, release check, corpus v3
+
+**Start state (verified):** `master` = `origin/master` = `ba916b8`; `feat/source-literal-probes` = `3b90f85` (CI run 40661340428 succeeded); `feat/muse-probe-experiment` was 3 commits ahead of its remote (`472257c`), with a clean tree.
+
+**Push identity:** with the author's approval, the three unpushed commits were rebuilt with the account's noreply address on identical trees (see the second session's note). The noreply address was derived from GitHub's public API (id 320630174) and GitHub's documented format. It is now this repository's local `user.email`. The originals are kept on the local branch `backup/muse-probe-experiment-59b73da`. `88b97d2` updated the docs' commit references. The branch was pushed normally as a fast-forward, with no force.
+
+**CI and merges (authorized by the author; each gated on tests, the frozen benchmark and CI):**
+- `88b97d2` (Muse branch): CI run 41201045754 succeeded, 451 passed and 2 skipped.
+- `c01da1b` = merge of `feat/source-literal-probes` into `master`.
+  - Its tree is identical to the branch.
+  - 385 tests OK.
+  - The benchmark reproduced the B review run exactly: 27 of 27 report hashes and the sweep identical.
+  - CI run 41202380081 succeeded, 383 passed and 2 skipped.
+- `68118fe` = merge of `feat/muse-probe-experiment`. Merging needed no rebase: the branch was stacked on the merged one, so no pushed history was rewritten.
+  - First rehearsed in a separate worktree. Its tree is identical to the branch.
+  - 453 tests OK.
+  - The default benchmark gave 14/15, 0/8, 27/27. E gave 14/15, 0/8, 27/27, with a sweep of 120/120.
+  - The A–F sweep reproduced fingerprint `8d510c36…69c0`.
+  - CI run 41225513697 succeeded, 451 passed and 2 skipped.
+- No branch was deleted. `master` = `origin/master` = `68118fe`.
+
+**Release check (the author chose "merged master is the release"; there is no deployment infrastructure):** a fresh clone of `origin/master` at `68118fe`, a new Python 3.12.14 venv, and `pip install -r requirements.txt`.
+- CLI exit codes: buggy 3, fixed 0, loophole 3, loophole with search budget 0 → 0, no reference 4, `--require-level L3` without a reference 5. All match the README.
+- The one-command demo exits 0 and writes four reports and four evidence pages.
+- 453 tests OK (2 skipped).
+
+**Corpus v3** (branch `feat/benchmark-v3` from `68118fe`):
+- `a027049` froze eight new cases, with ground truth and predictions, and was pushed before measurement.
+- Measured at 17:47 UTC on that commit:
+  - A: 12/21 detection;
+  - B: 14/21;
+  - E: 15/21; its one new find, `helper-computed-range`, was predicted.
+  - 0/10 false accusations and 0 spurious claims for all three.
+- Four new defects are missed by A, B and E at every budget and seed. The rounding window is hit only by sampling, in 1 of 10 seeds at budget 2000 and 3 of 10 at 8000.
+- `1296edc` prepared the Muse harness for v3.
+
+**Live calls:** none. **Validation:** 462 tests OK locally.
+
+**Next decision (the author's):**
+1. Authorize `record --corpus 3 --trials 1`: 8 calls, about $0.10 estimated.
+2. Before crediting Muse, measure the two cheap deterministic heuristics: numbers inside strings, and integers read as cents.
+3. Review and merge `feat/benchmark-v3`.
+
+## 2026-11-01: deterministic heuristics G and H on corpus v3
+
+**Start state (verified):** `feat/benchmark-v3` = its remote = `c540446`, clean. `master` = `origin/master` = `68118fe`. Corpus v3 frozen at `a027049`: pushed 23:17:27 +0530 on 2026-10-31, measured from 23:20:15. **No API call was made.** The eight-call v3 Muse run and every merge remain unauthorized.
+
+**Done:**
+- **`7ac132c`**: methods G (numbers inside string literals) and H (integers read as cents, only with evidence in the code), in `src/policyproof/literal_heuristics.py`.
+  - Each is independently switchable and off by default.
+  - Wired into `verify()` and `benchmark.run` (`--string-probes`, `--cents-probes`).
+  - 20 tests in `tests/test_literal_heuristics.py`; 482 tests OK.
+  - The predictions for 11 configurations went into BENCHMARK.md in the same commit, pushed before any measurement, with the disclosure that G and H were designed after v3 was measured.
+  - While writing the tests, two defects were found and fixed before the commit: the length cap could cut a number in half, and a leading-zero fragment (`000.00`) was read.
+- **Measurement**, 05:38-06:00 UTC, 11 configurations on corpus v3: two primary passes and the full sweep each, at the same budgets and seeds. Every prediction held.
+  - Detection: E 15/21 → E+G+H 17/21. Verdicts 30/35 → 32/35.
+  - The two target cases are exactly located in 10/10 seeds at every budget from 250 up.
+  - 0/10 false accusations and 0 spurious claims everywhere. No other case changed any scored field with B on.
+  - A, B and E reproduce the saved `a027049` score fingerprints exactly.
+  - One unpredicted report-hash change, `import-fails` under B and E, was traced to the harness stub moving from `run.py:87` to `run.py:88`. It is explained and harmless.
+- BENCHMARK.md results and limits; README; HACKATHON_CONTRIBUTIONS row 25. Rows 23-24 are on `feat/live-demo-evidence`, which also has the BOM fix `de5519b`, not on this branch: here the three buggy-engine cases still skip source probes, as in the saved baselines.
+
+**Conclusion:** two of the four v3 defects missed by A, B and E fall to cheap deterministic code, so a Muse win there would prove nothing. The fair baseline for Muse on v3 is E+G+H (17/21). The remaining tests of model value are `loop-assembled-cent` and `converted-rounding-window`; `imported-constant-cent` is a control.
+
+**Next decision (the author's):**
+1. Review; then decide whether to authorize the eight-call v3 Muse run (about $0.10 estimated), scored against E+G+H.
+2. Merging `feat/benchmark-v3` and `feat/live-demo-evidence` (expect small conflicts in DAILY_LOG, HACKATHON_CONTRIBUTIONS and README).
+
+## 2026-11-01 (later): generalization gate for G and H, then six live Muse calls on v3
+
+**Start state (verified):** `feat/benchmark-v3` = its remote = `563f6c1`, clean. G and H unchanged since `7ac132c`. `master` = `68118fe`, untouched. **Authorized:** a G/H generalization test, then up to eight live Muse calls on v3 (estimated about $0.10) only if it passed. No merges.
+
+**Done:**
+- **`07e44d4`, corpus g1:** 23 unseen targets (5 G positives, 5 H positives, 5 out of scope, 8 controls).
+  - Ground truth was checked by scanning every cent from $0 to $20,000.
+  - Predictions and seven acceptance criteria were pushed at 16:09 IST, before measurement.
+- **`f85d221`:** the first g1 run crashed in `render()` (it named the v2 case `exclusive-boundary`) before writing any result. Renderer fixed; JSON now saved first.
+- **Measured 10:58–11:10 UTC.** All seven criteria pass (`bcc4c3c`):
+  - A+G+H 9/15 against A 1/15.
+  - G 5/5 and H 3/5, H exactly at the bar.
+  - 0 false accusations, including a 2,400-run control sweep; 0 spurious claims.
+  - The v3 A/B/E fingerprints were reproduced.
+  - Three predictions failed and are explained: sampling luck, a corpus design error (`rule-after-long-text` never tested the cap), and a **real H bug** (a `Decimal(100)` factor marks the shared `ast.Load` node, so every loaded name looks scaled). H is not fixed, to avoid tuning against g1.
+- **`018b5ee`:** cost guard in the harness (per-call `max_output_tokens` from the remaining budget, ledger, stop rules, no retry), the v3 call order, and EGH/EGHM scoring. CI passed before the first call.
+- **LIVE, 13:19:49–13:20:57 UTC:** six calls, about $0.0898 estimated.
+  - One response (`imported_constant_cent`) was incomplete at the 6,000-token cap.
+  - The guard stopped before the last two calls, both correct targets, so they were not made.
+  - Evidence is in `artifacts/muse_probes_v3/`, backed up with verified hashes.
+- **Offline replay:** E+G+H 17/21 → E+G+H+Muse 19/21. `loop-assembled-cent` ($1,500.07) and `converted-rounding-window` (edges $2,007.49 / $2,008.57) are each exactly located in 10/10 seeds at every budget from 250 up. 0 false accusations in 300 control runs per method. A repeated sweep gave the same fingerprint `ff17fde175a88027`.
+
+**Conclusion:** the first measured case where Muse adds verified value beyond the strongest deterministic baseline: two defects, one response each. Model repeatability is unmeasured.
+
+**Next decision (the author's):**
+1. Whether to authorize the two remaining calls (correct targets, about $0.02) and repeat trials on the two winning targets, to measure repeatability.
+2. Fix the H bug, then test it on a new unseen corpus.
+3. Review and merge both feature branches.
+4. Decide whether the loop-cent replay becomes the demo's Muse beat.
+
+## 2026-11-01 (17:00–18:30 UTC; 2026-11-02 IST): H correction and corpus g2
+
+**Start state (verified):** `feat/benchmark-v3` = its remote = `5768b2e`, clean. Work happened on a new local branch, `feat/h-correction-g2`. **Authorized:** the H correction and g2 validation. **Not authorized:** live calls, merges or paid costs. Nothing was pushed, because this request did not authorize pushing.
+
+**Done:**
+- **Diagnosis:** marking a `Decimal(100)` factor marked Python's single shared `ast.Load` object, so every name looked scaled. This affected every `Decimal` spelling; a bare `100` was unaffected. Recorded in a before/after probe of 13 forms.
+- **`c4a0694`, the correction:** context objects are never marked. H declines, with a recorded reason, scale evidence that passes through a division (percentages) and cents names compared directly with dollars. 10 new development tests plus one rewritten (the percentage test); 507 tests OK.
+- **`3853910`, corpus g2:** 24 new targets, frozen with blob ids, SHA-256s, a ground-truth hash, predictions, an old-H ablation and nine criteria, committed at 17:50 UTC before any measurement.
+- **Measured 17:50–18:15 UTC.** All nine criteria pass:
+  - The corrected H found 6/6 Decimal-scaled cases, against 2/6 for the old H.
+  - Abstained on all 6 out-of-scope cases.
+  - 0 false accusations, including 4,000 control-sweep runs.
+  - The v3 A, B, E and E+G+H fingerprints were reproduced.
+  - Every prediction held.
+  - Post-hoc g1 (not validation): `special-set-scaled` is now found.
+
+**Next (the author's decision):**
+1. Push `feat/h-correction-g2` for CI.
+2. Merge order of the three feature branches.
+3. The two remaining Muse calls and repeat trials (unauthorized).

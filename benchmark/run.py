@@ -35,7 +35,8 @@ response. Results describe this small synthetic corpus only.
 
 Usage:
     python -m benchmark.run [--output-dir DIR] [--label NAME] [--overwrite]
-        [--seeds N] [--budgets 0,250,...] [--skip-sweep]
+        [--seeds N] [--budgets 0,250,...] [--skip-sweep] [--corpus 2|3|g1|g2]
+        [--no-source-probes] [--constant-probes] [--string-probes] [--cents-probes]
 """
 
 import argparse
@@ -50,6 +51,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 
+from benchmark import corpus_g2, corpus_gen, corpus_v3
 from benchmark.corpus import CASES, CORPUS_VERSION, CORRECT, DEFECT, FAILURE, Case
 from src.policyproof import reference as reference_module
 from src.policyproof.muse_client import replay_proposal
@@ -119,12 +121,18 @@ SOURCE_PROBES = True
 # Constant expressions in each target's source, folded (method E,
 # verify(constant_probes=...)). Off unless --constant-probes is given.
 CONSTANT_PROBES = False
+# Numbers inside string literals (method G, verify(string_probes=...)) and
+# integer literals the code marks as cents (method H, verify(cents_probes=...)).
+# Each is off unless --string-probes / --cents-probes is given.
+STRING_PROBES = False
+CENTS_PROBES = False
 
 
 def run_case(case: Case, policy_text: str, *, isolated: bool, budget: int | None = None,
              seed: int = DEFAULT_SEED, source_probes: bool | None = None,
              proposed_probes: tuple = (), proposed_origin: str | None = None,
-             keep_report: bool = False, constant_probes: bool | None = None) -> dict:
+             keep_report: bool = False, constant_probes: bool | None = None,
+             string_probes: bool | None = None, cents_probes: bool | None = None) -> dict:
     """Run one case and score its report. ``budget`` None: the case's own
     budget, or the CLI default. ``keep_report`` adds the full report under
     "report" for callers that need more than the score."""
@@ -143,6 +151,8 @@ def run_case(case: Case, policy_text: str, *, isolated: bool, budget: int | None
         source_probes=SOURCE_PROBES if source_probes is None else source_probes,
         proposed_probes=proposed_probes, proposed_probes_origin=proposed_origin,
         constant_probes=CONSTANT_PROBES if constant_probes is None else constant_probes,
+        string_probes=STRING_PROBES if string_probes is None else string_probes,
+        cents_probes=CENTS_PROBES if cents_probes is None else cents_probes,
     )
     seconds = time.perf_counter() - started
     text = result.to_json()
@@ -305,6 +315,8 @@ def _environment() -> dict:
         "corpus_version": CORPUS_VERSION,
         "source_probes": SOURCE_PROBES,
         "constant_probes": CONSTANT_PROBES,
+        "string_probes": STRING_PROBES,
+        "cents_probes": CENTS_PROBES,
         "commit": git("rev-parse", "HEAD"),
         "working_tree_dirty": None if status is None else bool(status),
         "python": platform.python_version(),
@@ -370,9 +382,12 @@ def render(results: dict) -> str:
             totals.append(f"{sum(x['intervals_found'] for x in rs)}/{sum(x['intervals_exact'] for x in rs)}"
                           f" of {sum(x['intervals_total'] for x in rs)}")
         lines.append("| **all** | " + " | ".join(totals) + " |")
+        # exclusive-boundary in corpora v2 and v3; the first defect case elsewhere (g1).
+        cases = [x["case"] for x in results["sweep"]]
+        shown = "exclusive-boundary" if "exclusive-boundary" in cases else cases[0]
         calls = [str(next(x["mean_search_calls"] for x in results["sweep"] if x["budget"] == b
-                          and x["case"] == "exclusive-boundary")) for b in budgets]
-        lines.append("| mean search calls (exclusive-boundary) | " + " | ".join(calls) + " |")
+                          and x["case"] == shown)) for b in budgets]
+        lines.append(f"| mean search calls ({shown}) | " + " | ".join(calls) + " |")
         lines.append(f"Spurious claims across the sweep: {sum(x['spurious_claims'] for x in results['sweep'])}")
     return "\n".join(lines) + "\n"
 
@@ -387,8 +402,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-sweep", action="store_true")
     parser.add_argument("--no-source-probes", action="store_true",
                         help="do not probe amounts written in the targets' source")
+    parser.add_argument("--corpus", choices=("2", "3", "g1", "g2"), default="2",
+                        help="ground-truth corpus: 2 (default), 3 (adds cases E cannot fold) g1 or g2 (G/H generalization)")
     parser.add_argument("--constant-probes", action="store_true",
                         help="also probe constant expressions folded from the targets' source (method E)")
+    parser.add_argument("--string-probes", action="store_true",
+                        help="also probe numbers written inside string literals (method G)")
+    parser.add_argument("--cents-probes", action="store_true",
+                        help="also probe integer literals the code marks as cents (method H)")
     args = parser.parse_args(argv)
 
     json_path = args.output_dir / f"results-{args.label}.json"
@@ -397,9 +418,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {json_path} or {md_path} exists; pass --overwrite", file=sys.stderr)
         return 1
 
-    global SOURCE_PROBES, CONSTANT_PROBES
+    global SOURCE_PROBES, CONSTANT_PROBES, STRING_PROBES, CENTS_PROBES, CASES, CORPUS_VERSION
+    if args.corpus == "3":
+        CASES, CORPUS_VERSION = corpus_v3.CASES, corpus_v3.CORPUS_VERSION
+    elif args.corpus == "g1":
+        CASES, CORPUS_VERSION = corpus_gen.CASES, corpus_gen.CORPUS_VERSION
+    elif args.corpus == "g2":
+        CASES, CORPUS_VERSION = corpus_g2.CASES, corpus_g2.CORPUS_VERSION
     SOURCE_PROBES = not args.no_source_probes
     CONSTANT_PROBES = args.constant_probes
+    STRING_PROBES = args.string_probes
+    CENTS_PROBES = args.cents_probes
     policy_text = POLICY.read_text(encoding="utf-8")
     results = {"environment": _environment()}
     first = [run_case(case, policy_text, isolated=True) for case in CASES]
@@ -413,10 +442,10 @@ def main(argv: list[str] | None = None) -> int:
         budgets = [int(b) for b in args.budgets.split(",")]
         results["sweep"] = sweep(policy_text, budgets, args.seeds)
 
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")  # before rendering
     text = render(results)
     print(text, end="")
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
     md_path.write_text(text, encoding="utf-8")
     print(f"\nWrote {json_path} and {md_path}")
     return 0
